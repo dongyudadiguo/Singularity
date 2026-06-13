@@ -1,416 +1,457 @@
 package main
 
 import (
-"bytes"
-"crypto/sha256"
-"encoding/binary"
-"encoding/gob"
-"encoding/hex"
-"fmt"
-"io"
-"log"
-"net/http"
-"os"
-"path/filepath"
-"sort"
-"sync"
+    "crypto/rand"
+    "crypto/sha256"
+    "encoding/binary"
+    "encoding/gob"
+    "encoding/json"
+    "io"
+    "log"
+    "net"
+    "net/http"
+    "net/url"
+    "os"
+    "sort"
+    "sync"
 )
 
 const (
-H         = 32
-maxUpload = 256 << 20
-maxToken  = 1 << 20
+    H       = 32
+    MaxBody = 256 << 20
+
+    OP_REGISTER byte = 1
+    OP_UPLOAD   byte = 2
+    OP_FILE     byte = 3
+    OP_EDGE     byte = 4
+    OP_CHILDREN byte = 5
+    OP_VOTE     byte = 6
+    OP_USET     byte = 7
+    OP_UGET     byte = 8
+
+    OK        byte = 0
+    ERR_BAD   byte = 1
+    ERR_DENY  byte = 2
+    ERR_NF    byte = 3
+    ERR_BIG   byte = 4
+    ERR_INNER byte = 5
 )
 
 type Hash [H]byte
 type Identity [H]byte
 
-type State struct {
-Edges  map[Hash]map[Hash]bool
-Votes  map[Identity]map[Hash]Hash
-UserKV map[Identity]map[Hash]Hash
+type UserKey struct {
+    User Identity
+    Key  Hash
 }
 
-var (
-mu sync.RWMutex
+type Edge struct {
+    Parent Hash
+    Child  Hash
+}
 
-edges  map[Hash]map[Hash]bool
-votes  map[Identity]map[Hash]Hash
-userKV map[Identity]map[Hash]Hash
+type VoteKey struct {
+    User   Identity
+    Parent Hash
+    Child  Hash
+}
 
-dataDir   = "data"
-filesDir  = filepath.Join(dataDir, "files")
-stateFile = filepath.Join(dataDir, "state.gob")
-)
+type DB struct {
+    Files map[Hash][]byte
+    Graph map[Hash][]Hash
+    Users map[Identity]bool
+    Vals  map[UserKey]Hash
+    Score map[Edge]int64
+    Voted map[VoteKey]bool
+    Seq   map[Edge]int64
+    Next  int64
+}
+
+type App struct {
+    mu     sync.Mutex
+    dbFile string
+    secret string
+    db     DB
+}
+
+func newDB() DB {
+    return DB{
+        Files: map[Hash][]byte{},
+        Graph: map[Hash][]Hash{},
+        Users: map[Identity]bool{},
+        Vals:  map[UserKey]Hash{},
+        Score: map[Edge]int64{},
+        Voted: map[VoteKey]bool{},
+        Seq:   map[Edge]int64{},
+    }
+}
 
 func hashFrom(b []byte) Hash {
-var h Hash
-copy(h[:], b)
-return h
+    var h Hash
+    copy(h[:], b)
+    return h
 }
 
-func identityFrom(b []byte) Identity {
-var id Identity
-copy(id[:], b)
-return id
+func idFrom(b []byte) Identity {
+    var id Identity
+    copy(id[:], b)
+    return id
 }
 
-func fail(w http.ResponseWriter, code int, msg string) {
-http.Error(w, msg, code)
+func hasChild(xs []Hash, h Hash) bool {
+    for _, x := range xs {
+        if x == h {
+            return true
+        }
+    }
+    return false
 }
 
-func bin(w http.ResponseWriter, code int, b []byte) {
-w.Header().Set("Content-Type", "application/octet-stream")
-w.WriteHeader(code)
-if len(b) != 0 {
-_, _ = w.Write(b)
-}
-}
+func (a *App) load() {
+    a.db = newDB()
 
-func empty(w http.ResponseWriter) {
-bin(w, http.StatusNoContent, nil)
-}
+    f, err := os.Open(a.dbFile)
+    if err != nil {
+        return
+    }
+    defer f.Close()
 
-func only(method string, h http.HandlerFunc) http.HandlerFunc {
-return func(w http.ResponseWriter, r *http.Request) {
-if r.Method != method {
-fail(w, http.StatusMethodNotAllowed, method+" only")
-return
-}
-h(w, r)
-}
-}
+    _ = gob.NewDecoder(f).Decode(&a.db)
 
-func readExact(w http.ResponseWriter, r *http.Request, n int) ([]byte, bool) {
-b, err := io.ReadAll(io.LimitReader(r.Body, int64(n+1)))
-if err != nil {
-fail(w, http.StatusBadRequest, "bad body")
-return nil, false
-}
-if len(b) != n {
-fail(w, http.StatusBadRequest, fmt.Sprintf("want %d bytes", n))
-return nil, false
-}
-return b, true
-}
-
-func readMax(w http.ResponseWriter, r *http.Request, max int64) ([]byte, bool) {
-b, err := io.ReadAll(io.LimitReader(r.Body, max+1))
-if err != nil {
-fail(w, http.StatusBadRequest, "bad body")
-return nil, false
-}
-if int64(len(b)) > max {
-fail(w, http.StatusRequestEntityTooLarge, "body too large")
-return nil, false
-}
-return b, true
+    if a.db.Files == nil {
+        a.db.Files = map[Hash][]byte{}
+    }
+    if a.db.Graph == nil {
+        a.db.Graph = map[Hash][]Hash{}
+    }
+    if a.db.Users == nil {
+        a.db.Users = map[Identity]bool{}
+    }
+    if a.db.Vals == nil {
+        a.db.Vals = map[UserKey]Hash{}
+    }
+    if a.db.Score == nil {
+        a.db.Score = map[Edge]int64{}
+    }
+    if a.db.Voted == nil {
+        a.db.Voted = map[VoteKey]bool{}
+    }
+    if a.db.Seq == nil {
+        a.db.Seq = map[Edge]int64{}
+    }
 }
 
-func initState() {
-edges = map[Hash]map[Hash]bool{}
-votes = map[Identity]map[Hash]Hash{}
-userKV = map[Identity]map[Hash]Hash{}
+func (a *App) save() {
+    tmp := a.dbFile + ".tmp"
+
+    f, err := os.Create(tmp)
+    if err != nil {
+        return
+    }
+
+    err = gob.NewEncoder(f).Encode(a.db)
+    cerr := f.Close()
+
+    if err == nil && cerr == nil {
+        _ = os.Rename(tmp, a.dbFile)
+    }
 }
 
-func loadState() {
-initState()
+func (a *App) verifyTurnstile(token string) bool {
+    if a.secret == "" {
+        return true
+    }
 
-f, err := os.Open(stateFile)
-if err != nil {
-return
-}
-defer f.Close()
+    form := url.Values{
+        "secret":   {a.secret},
+        "response": {token},
+    }
 
-var s State
-if gob.NewDecoder(f).Decode(&s) != nil {
-return
-}
+    resp, err := http.PostForm(
+        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        form,
+    )
+    if err != nil {
+        return false
+    }
+    defer resp.Body.Close()
 
-if s.Edges != nil {
-edges = s.Edges
-}
-if s.Votes != nil {
-votes = s.Votes
-}
-if s.UserKV != nil {
-userKV = s.UserKV
-}
-}
+    var out struct {
+        Success bool `json:"success"`
+    }
 
-func saveLocked() error {
-tmp := stateFile + ".tmp"
-
-f, err := os.Create(tmp)
-if err != nil {
-return err
+    _ = json.NewDecoder(resp.Body).Decode(&out)
+    return out.Success
 }
 
-err = gob.NewEncoder(f).Encode(State{
-Edges:  edges,
-Votes:  votes,
-UserKV: userKV,
-})
+func readFrame(c net.Conn) (byte, []byte, error) {
+    var h [5]byte
 
-if cerr := f.Close(); err == nil {
-err = cerr
+    if _, err := io.ReadFull(c, h[:]); err != nil {
+        return 0, nil, err
+    }
+
+    n := binary.BigEndian.Uint32(h[1:5])
+    if n > MaxBody {
+        return h[0], nil, io.ErrShortBuffer
+    }
+
+    b := make([]byte, n)
+    if n != 0 {
+        if _, err := io.ReadFull(c, b); err != nil {
+            return 0, nil, err
+        }
+    }
+
+    return h[0], b, nil
 }
 
-if err != nil {
-_ = os.Remove(tmp)
-return err
+func writeFrame(c net.Conn, status byte, body []byte) error {
+    var h [5]byte
+
+    h[0] = status
+    binary.BigEndian.PutUint32(h[1:5], uint32(len(body)))
+
+    if _, err := c.Write(h[:]); err != nil {
+        return err
+    }
+
+    if len(body) != 0 {
+        _, err := c.Write(body)
+        return err
+    }
+
+    return nil
 }
 
-return os.Rename(tmp, stateFile)
+func (a *App) handle(op byte, body []byte) (byte, []byte) {
+    switch op {
+    case OP_REGISTER:
+        if !a.verifyTurnstile(string(body)) {
+            return ERR_DENY, nil
+        }
+
+        var id Identity
+        if _, err := rand.Read(id[:]); err != nil {
+            return ERR_INNER, nil
+        }
+
+        a.mu.Lock()
+        a.db.Users[id] = true
+        a.save()
+        a.mu.Unlock()
+
+        return OK, id[:]
+
+    case OP_UPLOAD:
+        if len(body) == 0 {
+            return ERR_BAD, nil
+        }
+
+        sum := sha256.Sum256(body)
+        h := Hash(sum)
+
+        a.mu.Lock()
+        if _, exists := a.db.Files[h]; !exists {
+            a.db.Files[h] = append([]byte(nil), body...)
+            a.save()
+        }
+        a.mu.Unlock()
+
+        return OK, h[:]
+
+    case OP_FILE:
+        if len(body) != 32 {
+            return ERR_BAD, nil
+        }
+
+        h := hashFrom(body)
+
+        a.mu.Lock()
+        raw, found := a.db.Files[h]
+        out := append([]byte(nil), raw...)
+        a.mu.Unlock()
+
+        if !found {
+            return ERR_NF, nil
+        }
+
+        return OK, out
+
+    case OP_EDGE:
+        if len(body) != 64 {
+            return ERR_BAD, nil
+        }
+
+        parent := hashFrom(body[:32])
+        child := hashFrom(body[32:64])
+
+        a.mu.Lock()
+        if !hasChild(a.db.Graph[parent], child) {
+            a.db.Graph[parent] = append(a.db.Graph[parent], child)
+            a.save()
+        }
+        a.mu.Unlock()
+
+        return OK, nil
+
+    case OP_CHILDREN:
+        if len(body) != 32 {
+            return ERR_BAD, nil
+        }
+
+        parent := hashFrom(body)
+
+        a.mu.Lock()
+
+        list := append([]Hash(nil), a.db.Graph[parent]...)
+
+        sort.SliceStable(list, func(i, j int) bool {
+            ei := Edge{parent, list[i]}
+            ej := Edge{parent, list[j]}
+
+            if a.db.Score[ei] != a.db.Score[ej] {
+                return a.db.Score[ei] > a.db.Score[ej]
+            }
+
+            return a.db.Seq[ei] > a.db.Seq[ej]
+        })
+
+        out := make([]byte, 4+len(list)*40)
+        binary.BigEndian.PutUint32(out[:4], uint32(len(list)))
+
+        off := 4
+        for _, child := range list {
+            copy(out[off:off+32], child[:])
+            off += 32
+
+            score := a.db.Score[Edge{parent, child}]
+            binary.BigEndian.PutUint64(out[off:off+8], uint64(score))
+            off += 8
+        }
+
+        a.mu.Unlock()
+
+        return OK, out
+
+    case OP_VOTE:
+        if len(body) != 96 {
+            return ERR_BAD, nil
+        }
+
+        user := idFrom(body[:32])
+        parent := hashFrom(body[32:64])
+        child := hashFrom(body[64:96])
+
+        a.mu.Lock()
+        defer a.mu.Unlock()
+
+        if !a.db.Users[user] {
+            return ERR_DENY, nil
+        }
+
+        if !hasChild(a.db.Graph[parent], child) {
+            return ERR_BAD, nil
+        }
+
+        vk := VoteKey{user, parent, child}
+        e := Edge{parent, child}
+
+        if !a.db.Voted[vk] {
+            a.db.Voted[vk] = true
+            a.db.Score[e]++
+        }
+
+        a.db.Next++
+        a.db.Seq[e] = a.db.Next
+
+        a.save()
+
+        return OK, nil
+
+    case OP_USET:
+        if len(body) != 96 {
+            return ERR_BAD, nil
+        }
+
+        user := idFrom(body[:32])
+        key := hashFrom(body[32:64])
+        val := hashFrom(body[64:96])
+
+        a.mu.Lock()
+        defer a.mu.Unlock()
+
+        if !a.db.Users[user] {
+            return ERR_DENY, nil
+        }
+
+        a.db.Vals[UserKey{user, key}] = val
+        a.save()
+
+        return OK, nil
+
+    case OP_UGET:
+        if len(body) != 64 {
+            return ERR_BAD, nil
+        }
+
+        user := idFrom(body[:32])
+        key := hashFrom(body[32:64])
+
+        a.mu.Lock()
+        defer a.mu.Unlock()
+
+        if !a.db.Users[user] {
+            return ERR_DENY, nil
+        }
+
+        val, found := a.db.Vals[UserKey{user, key}]
+        if !found {
+            return ERR_NF, nil
+        }
+
+        return OK, val[:]
+    }
+
+    return ERR_BAD, nil
 }
 
-func addEdgeLocked(parent, child Hash) {
-m := edges[parent]
-if m == nil {
-m = map[Hash]bool{}
-edges[parent] = m
-}
-m[child] = true
-}
+func (a *App) serve(c net.Conn) {
+    defer c.Close()
 
-func filePath(h Hash) string {
-return filepath.Join(filesDir, hex.EncodeToString(h[:]))
-}
+    for {
+        op, body, err := readFrame(c)
+        if err != nil {
+            return
+        }
 
-func apiRegister(w http.ResponseWriter, r *http.Request) {
-b, ok := readMax(w, r, maxToken)
-if !ok {
-return
-}
+        status, out := a.handle(op, body)
 
-sum := sha256.Sum256(b)
-id := Identity(sum)
-
-bin(w, http.StatusOK, id[:])
-}
-
-func apiUpload(w http.ResponseWriter, r *http.Request) {
-b, ok := readMax(w, r, maxUpload)
-if !ok {
-return
-}
-
-sum := sha256.Sum256(b)
-h := Hash(sum)
-p := filePath(h)
-
-if _, err := os.Stat(p); os.IsNotExist(err) {
-tmp := p + ".tmp"
-
-if err := os.WriteFile(tmp, b, 0644); err != nil {
-fail(w, http.StatusInternalServerError, err.Error())
-return
-}
-
-if err := os.Rename(tmp, p); err != nil {
-_ = os.Remove(tmp)
-fail(w, http.StatusInternalServerError, err.Error())
-return
-}
-}
-
-bin(w, http.StatusOK, h[:])
-}
-
-func apiFile(w http.ResponseWriter, r *http.Request) {
-b, ok := readExact(w, r, 32)
-if !ok {
-return
-}
-
-h := hashFrom(b)
-
-file, err := os.ReadFile(filePath(h))
-if err != nil {
-fail(w, http.StatusNotFound, "file not found")
-return
-}
-
-bin(w, http.StatusOK, file)
-}
-
-func apiEdge(w http.ResponseWriter, r *http.Request) {
-b, ok := readExact(w, r, 64)
-if !ok {
-return
-}
-
-parent := hashFrom(b[:32])
-child := hashFrom(b[32:64])
-
-mu.Lock()
-addEdgeLocked(parent, child)
-err := saveLocked()
-mu.Unlock()
-
-if err != nil {
-fail(w, http.StatusInternalServerError, err.Error())
-return
-}
-
-empty(w)
-}
-
-type row struct {
-child Hash
-score int64
-}
-
-func apiChildren(w http.ResponseWriter, r *http.Request) {
-b, ok := readExact(w, r, 32)
-if !ok {
-return
-}
-
-parent := hashFrom(b)
-
-mu.RLock()
-
-var rows []row
-
-for child := range edges[parent] {
-var score int64
-
-for _, byParent := range votes {
-if v, ok := byParent[parent]; ok && v == child {
-score++
-}
-}
-
-rows = append(rows, row{child: child, score: score})
-}
-
-mu.RUnlock()
-
-sort.Slice(rows, func(i, j int) bool {
-if rows[i].score != rows[j].score {
-return rows[i].score > rows[j].score
-}
-return bytes.Compare(rows[i].child[:], rows[j].child[:]) < 0
-})
-
-out := make([]byte, 4+len(rows)*40)
-binary.BigEndian.PutUint32(out[:4], uint32(len(rows)))
-
-off := 4
-for _, r := range rows {
-copy(out[off:off+32], r.child[:])
-off += 32
-
-binary.BigEndian.PutUint64(out[off:off+8], uint64(r.score))
-off += 8
-}
-
-bin(w, http.StatusOK, out)
-}
-
-func apiVote(w http.ResponseWriter, r *http.Request) {
-b, ok := readExact(w, r, 96)
-if !ok {
-return
-}
-
-user := identityFrom(b[:32])
-parent := hashFrom(b[32:64])
-child := hashFrom(b[64:96])
-
-mu.Lock()
-
-addEdgeLocked(parent, child)
-
-m := votes[user]
-if m == nil {
-m = map[Hash]Hash{}
-votes[user] = m
-}
-
-m[parent] = child
-
-err := saveLocked()
-
-mu.Unlock()
-
-if err != nil {
-fail(w, http.StatusInternalServerError, err.Error())
-return
-}
-
-empty(w)
-}
-
-func apiUserSet(w http.ResponseWriter, r *http.Request) {
-b, ok := readExact(w, r, 96)
-if !ok {
-return
-}
-
-user := identityFrom(b[:32])
-key := hashFrom(b[32:64])
-val := hashFrom(b[64:96])
-
-mu.Lock()
-
-m := userKV[user]
-if m == nil {
-m = map[Hash]Hash{}
-userKV[user] = m
-}
-
-m[key] = val
-
-err := saveLocked()
-
-mu.Unlock()
-
-if err != nil {
-fail(w, http.StatusInternalServerError, err.Error())
-return
-}
-
-empty(w)
-}
-
-func apiUserGet(w http.ResponseWriter, r *http.Request) {
-b, ok := readExact(w, r, 64)
-if !ok {
-return
-}
-
-user := identityFrom(b[:32])
-key := hashFrom(b[32:64])
-
-var val Hash
-
-mu.RLock()
-if m := userKV[user]; m != nil {
-val = m[key]
-}
-mu.RUnlock()
-
-bin(w, http.StatusOK, val[:])
+        if writeFrame(c, status, out) != nil {
+            return
+        }
+    }
 }
 
 func main() {
-if err := os.MkdirAll(filesDir, 0755); err != nil {
-log.Fatal(err)
-}
+    app := &App{
+        dbFile: "cvm.gob",
+        secret: os.Getenv("CF_TURNSTILE_SECRET"),
+    }
 
-loadState()
+    app.load()
 
-http.HandleFunc("/api/register", only("POST", apiRegister))
-http.HandleFunc("/api/upload", only("POST", apiUpload))
-http.HandleFunc("/api/file", only("POST", apiFile))
-http.HandleFunc("/api/edge", only("POST", apiEdge))
-http.HandleFunc("/api/children", only("POST", apiChildren))
-http.HandleFunc("/api/vote", only("POST", apiVote))
-http.HandleFunc("/api/user/set", only("POST", apiUserSet))
-http.HandleFunc("/api/user/get", only("POST", apiUserGet))
+    ln, err := net.Listen("tcp", ":9000")
+    if err != nil {
+        panic(err)
+    }
 
-log.Println("CVM binary server listening on :9000")
-log.Fatal(http.ListenAndServe(":9000", nil))
+    log.Println("CVM binary TCP server listening on :9000")
+
+    for {
+        c, err := ln.Accept()
+        if err == nil {
+            go app.serve(c)
+        }
+    }
 }
