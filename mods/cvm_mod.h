@@ -35,15 +35,10 @@ typedef struct Host {
 
 static uint32_t rd32(u8 *p) { return *(uint32_t *)p; }
 static void wr32(u8 *p, uint32_t x) { *(uint32_t *)p = x; }
+static uint64_t rd64(u8 *p) { return *(uint64_t *)p; }
+static void wr64(u8 *p, uint64_t x) { *(uint64_t *)p = x; }
 
 static Buf mbuf(DWORD n) {
     Buf b = { malloc(n), n };
     return b;
-}
-
-static char *cstr(Buf b) {
-    char *s = malloc(b.n + 1);
-    memcpy(s, b.p, b.n);
-    s[b.n] = 0;
-    return s;
 }
