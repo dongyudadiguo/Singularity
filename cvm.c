@@ -3,6 +3,7 @@
 // VM 无预设指令；mods/*.dll 动态注册。
 // TCP binary RPC: req = op:u8 + len:u32be + body.
 // Op void；VM 不替指令 adv。
+// 单文件，无独立头文件，所有类型内联。
 
 #define _WIN32_WINNT 0x0601
 #define WIN32_LEAN_AND_MEAN
@@ -11,10 +12,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "cvm_host.h"
 
 #ifndef CVM_SERVER
-#define CVM_SERVER "124.221.146.23"
+#define CVM_SERVER "118.25.42.70"
 #endif
 
 #ifndef CVM_PORT
@@ -27,6 +27,45 @@
 #define OP_FILE     3
 #define OP_CHILDREN 5
 
+// ============ Types (inlined, no cvm_host.h) ============
+typedef unsigned char u8;
+
+typedef struct {
+    u8 *p;
+    DWORD n;
+} Buf;
+
+typedef struct {
+    Buf f;
+    DWORD off;
+    u8 key[H];
+} Frame;
+
+typedef void (*Op)(u8 *data, uint32_t len);
+
+typedef struct Host {
+    void (*op)(u8 *id, Op fn);
+    void (*op_name)(char *name, Op fn);
+    void (*del)(u8 *id);
+    void (*del_name)(char *name);
+
+    void (*override)(u8 *key, u8 *file, DWORD len);
+    void (*touch)();
+
+    Buf  (*rpc)(uint8_t op, u8 *body, DWORD len);
+
+    void (*run)(u8 *hash);
+    void (*enter)(u8 *hash);
+    void (*adv)();
+
+    void (*push)(u8 *p, DWORD n);
+    Buf  (*pop)();
+    Buf *(*top)();
+
+    Frame *cur;
+} Host;
+
+// ============ Ins / Ov ============
 typedef struct { u8 id[H]; Op fn; } Ins;
 typedef struct { u8 key[H]; Buf f; } Ov;
 

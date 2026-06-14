@@ -1,10 +1,50 @@
-#include "../cvm_host.h"
+// 04_data: list and key-constant operations
+
 #include <windows.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-static Host *H;
+#define H 32
+
+typedef unsigned char u8;
+
+typedef struct {
+    u8 *p;
+    DWORD n;
+} Buf;
+
+typedef struct {
+    Buf f;
+    DWORD off;
+    u8 key[H];
+} Frame;
+
+typedef void (*Op)(u8 *data, uint32_t len);
+
+typedef struct Host {
+    void (*op)(u8 *id, Op fn);
+    void (*op_name)(char *name, Op fn);
+    void (*del)(u8 *id);
+    void (*del_name)(char *name);
+
+    void (*override)(u8 *key, u8 *file, DWORD len);
+    void (*touch)();
+
+    Buf  (*rpc)(uint8_t op, u8 *body, DWORD len);
+
+    void (*run)(u8 *hash);
+    void (*enter)(u8 *hash);
+    void (*adv)();
+
+    void (*push)(u8 *p, DWORD n);
+    Buf  (*pop)();
+    Buf *(*top)();
+
+    Frame *cur;
+} Host;
+
+static Host *h;
 
 enum {
     K_ESC = 27,
@@ -37,11 +77,11 @@ static void put32(u8 *p, uint32_t x) {
 static void push32(uint32_t x) {
     u8 b[4];
     put32(b, x);
-    H->push(b, 4);
+    h->push(b, 4);
 }
 
 static uint32_t pop32() {
-    Buf b = H->pop();
+    Buf b = h->pop();
     uint32_t x = b.n >= 4 ? u32(b.p) : 0;
     free(b.p);
     return x;
@@ -90,34 +130,34 @@ static void add(u8 **p, DWORD *n, u8 *x, DWORD xn) {
 
 static void op_lst_new(u8 *d, uint32_t n) {
     u8 b[4] = {0};
-    H->push(b, 4);
-    H->adv();
+    h->push(b, 4);
+    h->adv();
 }
 
 static void op_lst_count(u8 *d, uint32_t n) {
-    Buf b = H->pop();
+    Buf b = h->pop();
     push32(lcnt(&b));
     free(b.p);
-    H->adv();
+    h->adv();
 }
 
 static void op_lst_get(u8 *d, uint32_t n) {
     uint32_t idx = pop32();
-    Buf b = H->pop();
+    Buf b = h->pop();
     DWORD o, sz;
 
     if (elem(&b, idx, &o, &sz))
-        H->push(b.p + o, sz);
+        h->push(b.p + o, sz);
     else
-        H->push(0, 0);
+        h->push(0, 0);
 
     free(b.p);
-    H->adv();
+    h->adv();
 }
 
 static void op_lst_push(u8 *d, uint32_t n) {
-    Buf e = H->pop();
-    Buf b = H->pop();
+    Buf e = h->pop();
+    Buf b = h->pop();
 
     uint32_t c = lcnt(&b);
     DWORD tail = b.n >= 4 ? b.n - 4 : 0;
@@ -134,25 +174,25 @@ static void op_lst_push(u8 *d, uint32_t n) {
     if (e.n)
         memcpy(o + 8 + tail, e.p, e.n);
 
-    H->push(o, on);
+    h->push(o, on);
 
     free(o);
     free(b.p);
     free(e.p);
 
-    H->adv();
+    h->adv();
 }
 
 static void op_lst_del(u8 *d, uint32_t n) {
     uint32_t idx = pop32();
-    Buf b = H->pop();
+    Buf b = h->pop();
 
     uint32_t c = lcnt(&b);
 
     if (idx >= c) {
-        H->push(b.p, b.n);
+        h->push(b.p, b.n);
         free(b.p);
-        H->adv();
+        h->adv();
         return;
     }
 
@@ -173,17 +213,17 @@ static void op_lst_del(u8 *d, uint32_t n) {
 
     put32(o, outc);
 
-    H->push(o, on);
+    h->push(o, on);
 
     free(o);
     free(b.p);
 
-    H->adv();
+    h->adv();
 }
 
 static void op_lst_join(u8 *d, uint32_t n) {
-    Buf sep = H->pop();
-    Buf b = H->pop();
+    Buf sep = h->pop();
+    Buf b = h->pop();
 
     uint32_t c = lcnt(&b);
     u8 *o = 0;
@@ -208,18 +248,18 @@ static void op_lst_join(u8 *d, uint32_t n) {
         }
     }
 
-    H->push(o, on);
+    h->push(o, on);
 
     free(o);
     free(b.p);
     free(sep.p);
 
-    H->adv();
+    h->adv();
 }
 
 static void key_const(uint32_t x) {
     push32(x);
-    H->adv();
+    h->adv();
 }
 
 static void op_key_esc(u8 *d, uint32_t n) { key_const(K_ESC); }
@@ -238,52 +278,52 @@ static void op_key_pgup(u8 *d, uint32_t n) { key_const(K_PGUP); }
 static void op_key_pgdn(u8 *d, uint32_t n) { key_const(K_PGDN); }
 
 static void op_key_code(u8 *d, uint32_t n) {
-    Buf e = H->pop();
+    Buf e = h->pop();
     push32(e.n >= 4 ? u32(e.p) : 0);
     free(e.p);
-    H->adv();
+    h->adv();
 }
 
 static void op_key_mods(u8 *d, uint32_t n) {
-    Buf e = H->pop();
+    Buf e = h->pop();
     push32(e.n >= 8 ? u32(e.p + 4) : 0);
     free(e.p);
-    H->adv();
+    h->adv();
 }
 
 static void op_key_ascii(u8 *d, uint32_t n) {
-    Buf e = H->pop();
+    Buf e = h->pop();
     push32(e.n >= 12 ? u32(e.p + 8) : 0);
     free(e.p);
-    H->adv();
+    h->adv();
 }
 
 __declspec(dllexport)
-void cvm_init(Host *h) {
-    H = h;
+void cvm_init(Host *host) {
+    h = host;
 
-    h->op_name("LST:NEW", op_lst_new);
-    h->op_name("LST:COUNT", op_lst_count);
-    h->op_name("LST:GET", op_lst_get);
-    h->op_name("LST:PUSH", op_lst_push);
-    h->op_name("LST:DEL", op_lst_del);
-    h->op_name("LST:JOIN", op_lst_join);
+    host->op_name("LST:NEW", op_lst_new);
+    host->op_name("LST:COUNT", op_lst_count);
+    host->op_name("LST:GET", op_lst_get);
+    host->op_name("LST:PUSH", op_lst_push);
+    host->op_name("LST:DEL", op_lst_del);
+    host->op_name("LST:JOIN", op_lst_join);
 
-    h->op_name("KEY:ESC", op_key_esc);
-    h->op_name("KEY:ENTER", op_key_enter);
-    h->op_name("KEY:BACK", op_key_back);
-    h->op_name("KEY:DEL", op_key_del);
-    h->op_name("KEY:TAB", op_key_tab);
-    h->op_name("KEY:SPACE", op_key_space);
-    h->op_name("KEY:LEFT", op_key_left);
-    h->op_name("KEY:RIGHT", op_key_right);
-    h->op_name("KEY:UP", op_key_up);
-    h->op_name("KEY:DOWN", op_key_down);
-    h->op_name("KEY:HOME", op_key_home);
-    h->op_name("KEY:END", op_key_end);
-    h->op_name("KEY:PGUP", op_key_pgup);
-    h->op_name("KEY:PGDN", op_key_pgdn);
-    h->op_name("KEY:CODE", op_key_code);
-    h->op_name("KEY:ASCII", op_key_ascii);
-    h->op_name("KEY:MODS", op_key_mods);
+    host->op_name("KEY:ESC", op_key_esc);
+    host->op_name("KEY:ENTER", op_key_enter);
+    host->op_name("KEY:BACK", op_key_back);
+    host->op_name("KEY:DEL", op_key_del);
+    host->op_name("KEY:TAB", op_key_tab);
+    host->op_name("KEY:SPACE", op_key_space);
+    host->op_name("KEY:LEFT", op_key_left);
+    host->op_name("KEY:RIGHT", op_key_right);
+    host->op_name("KEY:UP", op_key_up);
+    host->op_name("KEY:DOWN", op_key_down);
+    host->op_name("KEY:HOME", op_key_home);
+    host->op_name("KEY:END", op_key_end);
+    host->op_name("KEY:PGUP", op_key_pgup);
+    host->op_name("KEY:PGDN", op_key_pgdn);
+    host->op_name("KEY:CODE", op_key_code);
+    host->op_name("KEY:ASCII", op_key_ascii);
+    host->op_name("KEY:MODS", op_key_mods);
 }
