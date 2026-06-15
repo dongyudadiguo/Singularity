@@ -1,6 +1,6 @@
-ZERO children: status=0 count=1
-first hash=a78bbf15bc91b63010e607da574022d9bee1a27e55a3cc2e1883b4a644e109d6
-FILE status=0 len=9610
-local zero.bin=9610 sha256=a78bbf15bc91b63010e607da574022d9bee1a27e55a3cc2e1883b4a644e109d6
-server block=9610 sha256=a78bbf15bc91b63010e607da574022d9bee1a27e55a3cc2e1883b4a644e109d6
+ZERO children: status=0 count=3
+first hash=2e677baabba6e80d93444991a5710bdb054c9881adcb0cbc2248076e2bead573
+FILE status=0 len=10770
+local zero.bin=10770 sha256=2e677baabba6e80d93444991a5710bdb054c9881adcb0cbc2248076e2bead573
+server block=10770 sha256=2e677baabba6e80d93444991a5710bdb054c9881adcb0cbc2248076e2bead573
 match=True

@@ -1,342 +1,214 @@
-// 02_block: block editing operations (count, hash, data, item, end, ins, del, set)
+// 02_block — 块编辑（插入、删除、修改）
+// gcc -shared mods_src/02_block.c -Os -s -o mods/02_block.dll
 
 #include <windows.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define H 32
 
 typedef unsigned char u8;
+typedef struct { u8 *p; uint32_t n; } Buf;
 
 typedef struct {
-    u8 *p;
-    DWORD n;
-} Buf;
-
-typedef struct {
-    Buf f;
-    DWORD off;
-    u8 key[H];
-} Frame;
-
-typedef void (*Op)(u8 *data, uint32_t len);
-
-typedef struct Host {
-    void (*op)(u8 *id, Op fn);
-    void (*op_name)(char *name, Op fn);
-    void (*del)(u8 *id);
-    void (*del_name)(char *name);
-
-    void (*override)(u8 *key, u8 *file, DWORD len);
-    void (*touch)();
-
-    Buf  (*rpc)(uint8_t op, u8 *body, DWORD len);
-
-    void (*run)(u8 *hash);
-    void (*enter)(u8 *hash);
-    void (*adv)();
-
-    void (*push)(u8 *p, DWORD n);
-    Buf  (*pop)();
-    Buf *(*top)();
-
-    Frame *cur;
+    void (*op)(u8 *, void (*)(u8 *, uint32_t));
+    void (*op_name)(char *, void (*)(u8 *, uint32_t));
+    void (*del)(u8 *);
+    void (*del_name)(char *);
+    void (*override)(u8 *, u8 *, uint32_t);
+    void (*touch)(void);
+    Buf (*rpc)(uint8_t, u8 *, uint32_t);
+    void (*run)(u8 *);
+    void (*enter)(u8 *);
+    void (*adv)(void);
+    void (*push)(u8 *, uint32_t);
+    Buf (*pop)(void);
+    Buf *(*top)(void);
+    void *cur;
 } Host;
 
 static Host *h;
 
-static uint32_t u32(u8 *p) {
-    uint32_t x = 0;
-    memcpy(&x, p, 4);
-    return x;
-}
+static uint32_t U(u8 *p) { uint32_t x; memcpy(&x, p, 4); return x; }
+static void WU(u8 *p, uint32_t v) { memcpy(p, &v, 4); }
 
-static void put32(u8 *p, uint32_t x) {
-    memcpy(p, &x, 4);
-}
+static uint32_t pop_u32(void) { Buf b=h->pop(); return b.n>=4?U(b.p):0; }
+static void push_u32(uint32_t v) { u8 buf[4];WU(buf,v); h->push(buf,4); }
 
-static int z32(u8 *p) {
-    for (int i = 0; i < 32; i++)
-        if (p[i])
-            return 0;
+// Block format: [32 byte token][4 byte span (u32le)][payload...]
+// End marker: 32 zero bytes
+
+static int is_zero(u8 *p, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) if (p[i]) return 0;
     return 1;
 }
 
-static uint32_t pop32() {
-    Buf b = h->pop();
-    uint32_t x = b.n >= 4 ? u32(b.p) : 0;
-    free(b.p);
-    return x;
-}
-
-static void push32(uint32_t x) {
-    u8 b[4];
-    put32(b, x);
-    h->push(b, 4);
-}
-
-static uint32_t count_items(Buf *b) {
-    DWORD o = 0;
-    uint32_t c = 0;
-
-    while (o + 32 <= b->n && !z32(b->p + o)) {
-        if (o + 36 > b->n)
-            break;
-
-        uint32_t span = u32(b->p + o + 32);
-
-        if (span < 4 || o + 32 + span > b->n)
-            break;
-
-        c++;
-        o += 32 + span;
+static uint32_t blk_count(u8 *data, uint32_t len) {
+    uint32_t cnt = 0;
+    uint32_t off = 0;
+    while (off + H <= len && !is_zero(data + off, H)) {
+        uint32_t span = off + H <= len ? U(data + off + H) : 0;
+        off += H + span;
+        cnt++;
     }
-
-    return c;
+    return cnt;
 }
 
-static int itempos(Buf *b, uint32_t idx, DWORD *po, DWORD *pn) {
-    DWORD o = 0;
-    uint32_t c = 0;
+// BLK: block operations
+static void blk_count_op(u8 *p, uint32_t n) {
+    Buf b = h->pop();
+    push_u32(blk_count(b.p, b.n));
+}
 
-    while (o + 32 <= b->n && !z32(b->p + o)) {
-        if (o + 36 > b->n)
-            break;
+static void blk_hash(u8 *p, uint32_t n) {
+    uint32_t idx = pop_u32();
+    Buf b = h->pop();
+    uint32_t cnt = 0;
+    uint32_t off = 0;
+    u8 z[H]; memset(z,0,H);
+    while (off + H <= b.n && !is_zero(b.p + off, H)) {
+        if (cnt == idx) { h->push(b.p + off, H); return; }
+        uint32_t span = U(b.p + off + H);
+        off += H + span;
+        cnt++;
+    }
+    h->push(z, H);
+}
 
-        uint32_t span = u32(b->p + o + 32);
-
-        if (span < 4 || o + 32 + span > b->n)
-            break;
-
-        if (c == idx) {
-            *po = o;
-            *pn = 32 + span;
-            return 1;
+static void blk_data(u8 *p, uint32_t n) {
+    uint32_t idx = pop_u32();
+    Buf b = h->pop();
+    uint32_t cnt = 0;
+    uint32_t off = 0;
+    while (off + H <= b.n && !is_zero(b.p + off, H)) {
+        if (cnt == idx) {
+            uint32_t span = U(b.p + off + H);
+            h->push(b.p + off + H + 4, span);
+            return;
         }
-
-        c++;
-        o += 32 + span;
+        uint32_t span = U(b.p + off + H);
+        off += H + span;
+        cnt++;
     }
-
-    return 0;
+    h->push(0, 0);
 }
 
-static DWORD insertpos(Buf *b, uint32_t idx) {
-    DWORD o = 0;
-    uint32_t c = 0;
-
-    while (o + 32 <= b->n && !z32(b->p + o)) {
-        if (c >= idx)
-            return o;
-
-        if (o + 36 > b->n)
-            return b->n;
-
-        uint32_t span = u32(b->p + o + 32);
-
-        if (span < 4 || o + 32 + span > b->n)
-            return b->n;
-
-        c++;
-        o += 32 + span;
-    }
-
-    return o;
-}
-
-static int has_end(Buf *b) {
-    DWORD o = 0;
-
-    while (o + 32 <= b->n) {
-        if (z32(b->p + o))
-            return 1;
-
-        if (o + 36 > b->n)
-            return 0;
-
-        uint32_t span = u32(b->p + o + 32);
-
-        if (span < 4 || o + 32 + span > b->n)
-            return 0;
-
-        o += 32 + span;
-    }
-
-    return 0;
-}
-
-static void op_count(u8 *d, uint32_t n) {
+static void blk_item(u8 *p, uint32_t n) {
+    uint32_t idx = pop_u32();
     Buf b = h->pop();
-    push32(count_items(&b));
-    free(b.p);
-    h->adv();
+    uint32_t cnt = 0;
+    uint32_t off = 0;
+    while (off + H <= b.n && !is_zero(b.p + off, H)) {
+        if (cnt == idx) {
+            uint32_t span = U(b.p + off + H);
+            h->push(b.p + off, H + 4 + span);
+            return;
+        }
+        uint32_t span = U(b.p + off + H);
+        off += H + span;
+        cnt++;
+    }
+    h->push(0, 0);
 }
 
-static void op_hash(u8 *d, uint32_t n) {
-    uint32_t idx = pop32();
+static void blk_end(u8 *p, uint32_t n) {
+    // Return offset of end marker (after last block or 0 if empty)
     Buf b = h->pop();
-    DWORD o, sz;
-    u8 z[32] = {0};
-
-    if (itempos(&b, idx, &o, &sz))
-        h->push(b.p + o, 32);
-    else
-        h->push(z, 32);
-
-    free(b.p);
-    h->adv();
+    uint32_t off = 0;
+    while (off + H <= b.n && !is_zero(b.p + off, H)) {
+        uint32_t span = U(b.p + off + H);
+        off += H + span;
+    }
+    push_u32(off);
 }
 
-static void op_data(u8 *d, uint32_t n) {
-    uint32_t idx = pop32();
+static void blk_ins(u8 *p, uint32_t n) {
+    // stack: block_hash, data, insert_at_offset
+    // insert a new block at offset
+    uint32_t at = pop_u32();
+    Buf data = h->pop();
     Buf b = h->pop();
-    DWORD o, sz;
+    
+    uint32_t item_len = H + 4 + data.n;
+    u8 *item = malloc(item_len);
+    memcpy(item, data.p, data.n < H ? data.n : H);
+    memset(item + (data.n < H ? data.n : H), 0, H - (data.n < H ? data.n : H));
+    WU(item + H, data.n);
+    memcpy(item + H + 4, data.p, data.n);
+    
+    if (at > b.n) at = b.n;
+    uint32_t new_len = b.n + item_len;
+    u8 *new_data = malloc(new_len);
+    memcpy(new_data, b.p, at);
+    memcpy(new_data + at, item, item_len);
+    memcpy(new_data + at + item_len, b.p + at, b.n - at);
+    h->push(new_data, new_len);
+    free(item);
+    free(new_data);
+}
 
-    if (itempos(&b, idx, &o, &sz)) {
-        uint32_t span = u32(b.p + o + 32);
-        h->push(b.p + o + 36, span - 4);
-    } else {
-        h->push(0, 0);
+static void blk_del(u8 *p, uint32_t n) {
+    // stack: block_hash, delete_at_offset
+    uint32_t at = pop_u32();
+    Buf b = h->pop();
+    
+    if (at >= b.n) { h->push(b.p, b.n); return; }
+    
+    // Find the end of the block at 'at'
+    uint32_t span = at + H <= b.n ? U(b.p + at + H) : 0;
+    uint32_t item_len = H + 4 + span;
+    
+    uint32_t new_len = b.n - item_len;
+    u8 *new_data = malloc(new_len);
+    memcpy(new_data, b.p, at);
+    memcpy(new_data + at, b.p + at + item_len, b.n - at - item_len);
+    h->push(new_data, new_len);
+    free(new_data);
+}
+
+static void blk_set(u8 *p, uint32_t n) {
+    // stack: block_hash, new_data, block_hash_to_replace
+    // Replace the data of a block (keeping its hash)
+    Buf old_hash = h->pop();
+    Buf new_data = h->pop();
+    Buf b = h->pop();
+    
+    // Find the block with old_hash and replace its data
+    uint32_t off = 0;
+    while (off + H <= b.n && !is_zero(b.p + off, H)) {
+        if (!memcmp(b.p + off, old_hash.p, H)) {
+            // Found it, rebuild
+            uint32_t old_span = U(b.p + off + H);
+            uint32_t before = off;
+            uint32_t after_start = off + H + 4 + old_span;
+            uint32_t after_len = b.n - after_start;
+            
+            uint32_t new_len = before + H + 4 + new_data.n + after_len;
+            u8 *new_data_buf = malloc(new_len);
+            memcpy(new_data_buf, b.p, before);
+            memcpy(new_data_buf + before, b.p + off, H); // keep hash
+            WU(new_data_buf + before + H, new_data.n);
+            memcpy(new_data_buf + before + H + 4, new_data.p, new_data.n);
+            memcpy(new_data_buf + before + H + 4 + new_data.n, b.p + after_start, after_len);
+            h->push(new_data_buf, new_len);
+            free(new_data_buf);
+            return;
+        }
+        uint32_t span = U(b.p + off + H);
+        off += H + 4 + span;
     }
-
-    free(b.p);
-    h->adv();
+    h->push(b.p, b.n);
 }
 
-static void op_item(u8 *d, uint32_t n) {
-    Buf payload = h->pop();
-    Buf tok = h->pop();
-
-    DWORD outn = 36 + payload.n;
-    uint32_t span = 4 + payload.n;
-    u8 *o = malloc(outn);
-
-    memset(o, 0, 32);
-    if (tok.n) memcpy(o, tok.p, tok.n > 32 ? 32 : tok.n);
-    put32(o + 32, span);
-    if (payload.n) memcpy(o + 36, payload.p, payload.n);
-
-    h->push(o, outn);
-
-    free(o);
-    free(tok.p);
-    free(payload.p);
-
-    h->adv();
-}
-
-static void op_end(u8 *d, uint32_t n) {
-    u8 z[32] = {0};
-    h->push(z, 32);
-    h->adv();
-}
-
-static void op_ins(u8 *d, uint32_t n) {
-    Buf item = h->pop();
-    uint32_t idx = pop32();
-    Buf file = h->pop();
-
-    DWORD pos = insertpos(&file, idx);
-    DWORD add = has_end(&file) ? 0 : 32;
-    DWORD outn = file.n + item.n + add;
-    u8 *o = malloc(outn);
-    DWORD k = 0;
-
-    if (pos) memcpy(o + k, file.p, pos);
-    k += pos;
-
-    if (item.n) memcpy(o + k, item.p, item.n);
-    k += item.n;
-
-    if (file.n > pos) memcpy(o + k, file.p + pos, file.n - pos);
-    k += file.n - pos;
-
-    if (add) {
-        memset(o + k, 0, 32);
-        k += 32;
-    }
-
-    h->push(o, outn);
-
-    free(o);
-    free(file.p);
-    free(item.p);
-
-    h->adv();
-}
-
-static void op_del(u8 *d, uint32_t n) {
-    uint32_t idx = pop32();
-    Buf file = h->pop();
-    DWORD pos, sz;
-
-    if (!itempos(&file, idx, &pos, &sz)) {
-        h->push(file.p, file.n);
-        free(file.p);
-        h->adv();
-        return;
-    }
-
-    DWORD outn = file.n - sz;
-    u8 *o = malloc(outn);
-
-    if (pos) memcpy(o, file.p, pos);
-    if (file.n > pos + sz) memcpy(o + pos, file.p + pos + sz, file.n - pos - sz);
-
-    h->push(o, outn);
-
-    free(o);
-    free(file.p);
-
-    h->adv();
-}
-
-static void op_set(u8 *d, uint32_t n) {
-    Buf item = h->pop();
-    uint32_t idx = pop32();
-    Buf file = h->pop();
-    DWORD pos, sz;
-
-    if (!itempos(&file, idx, &pos, &sz)) {
-        h->push(file.p, file.n);
-        free(file.p);
-        free(item.p);
-        h->adv();
-        return;
-    }
-
-    DWORD outn = file.n - sz + item.n;
-    u8 *o = malloc(outn);
-    DWORD k = 0;
-
-    if (pos) memcpy(o + k, file.p, pos);
-    k += pos;
-
-    if (item.n) memcpy(o + k, item.p, item.n);
-    k += item.n;
-
-    if (file.n > pos + sz) memcpy(o + k, file.p + pos + sz, file.n - pos - sz);
-
-    h->push(o, outn);
-
-    free(o);
-    free(file.p);
-    free(item.p);
-
-    h->adv();
-}
-
-__declspec(dllexport)
 void cvm_init(Host *host) {
     h = host;
-
-    host->op_name("BLK:COUNT", op_count);
-    host->op_name("BLK:HASH", op_hash);
-    host->op_name("BLK:DATA", op_data);
-    host->op_name("BLK:ITEM", op_item);
-    host->op_name("BLK:END", op_end);
-    host->op_name("BLK:INS", op_ins);
-    host->op_name("BLK:DEL", op_del);
-    host->op_name("BLK:SET", op_set);
+    h->op_name("BLK:COUNT", blk_count_op);
+    h->op_name("BLK:HASH", blk_hash);
+    h->op_name("BLK:DATA", blk_data);
+    h->op_name("BLK:ITEM", blk_item);
+    h->op_name("BLK:END", blk_end);
+    h->op_name("BLK:INS", blk_ins);
+    h->op_name("BLK:DEL", blk_del);
+    h->op_name("BLK:SET", blk_set);
 }
