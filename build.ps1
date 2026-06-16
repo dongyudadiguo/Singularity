@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 New-Item -ItemType Directory -Force mods | Out-Null
 
-gcc .\cvm.c -Os -s -o .\cvm.exe -lws2_32
+gcc .\vm.c -Os -s -o .\cvm.exe -lws2_32
 
 gcc -shared .\mods_src\00_core.c    -Os -s -o .\mods\00_core.dll    -lbcrypt
 gcc -shared .\mods_src\01_graph.c   -Os -s -o .\mods\01_graph.dll

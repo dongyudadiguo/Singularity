@@ -35,13 +35,13 @@ static void WU(u8 *p, uint32_t v) { memcpy(p, &v, 4); }
 
 static u8 *dupbuf(u8 *p, uint32_t n) { u8 *b=malloc(n);if(b&&n)memcpy(b,p,n);return b; }
 
-// RPC opcodes
+// RPC opcodes (must match server.go)
 #define OP_REGISTER  1
-#define OP_FILE      2
-#define OP_CHILDREN  3
+#define OP_UPLOAD    2
+#define OP_FILE      3
 #define OP_EDGE      4
-#define OP_VOTE      5
-#define OP_UPLOAD    6
+#define OP_CHILDREN  5
+#define OP_VOTE      6
 #define OP_USET      7
 #define OP_UGET      8
 

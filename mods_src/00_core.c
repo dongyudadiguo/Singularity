@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#include <bcrypt.h>
+#include <stdio.h>
 
 #define H 32
 
