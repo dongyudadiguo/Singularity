@@ -32,6 +32,7 @@ static Host *h;
 
 static uint32_t U(u8 *p) { uint32_t x; memcpy(&x, p, 4); return x; }
 static void WU(u8 *p, uint32_t v) { memcpy(p, &v, 4); }
+static uint32_t pop_u32(void) { Buf b = h->pop(); return b.n >= 4 ? U(b.p) : 0; }
 static void push_u32(uint32_t v) { u8 buf[4]; WU(buf, v); h->push(buf, 4); }
 
 // List implementation: stored as contiguous blocks

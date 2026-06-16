@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <bcrypt.h>
 
 #define H 32
 
@@ -163,14 +164,16 @@ static void u32_dec(u8 *p, uint32_t n) { uint32_t v=pop_u32();char buf[16];int l
 static void hash_sha256(u8 *p, uint32_t n) {
     Buf b = h->pop();
     u8 hash[H];
-    BCRYPT_ALG_HANDLE alg;
-    BCRYPT_OPEN_ALG_HANDLE(BCRYPT_SHA256_ALGORITHM, 0, &alg);
-    BCRYPT_HASH_HANDLE hh;
-    BCRYPT_CREATE_HASH(alg, &hh, 0, 0, 0, 0);
-    BCRYPT_HASH_DATA(hh, b.p, b.n, 0);
-    BCRYPT_FINISH_HASH(hh, hash, H, 0);
-    BCRYPT_DESTROY_HASH(hh);
-    BCRYPT_CLOSE_ALG_HANDLE(alg);
+    BCRYPT_ALG_HANDLE  alg = NULL;
+    BCRYPT_HASH_HANDLE hh  = NULL;
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) == 0) {
+        if (BCryptCreateHash(alg, &hh, NULL, 0, NULL, 0, 0) == 0) {
+            BCryptHashData(hh, b.p, b.n, 0);
+            BCryptFinishHash(hh, hash, H, 0);
+            BCryptDestroyHash(hh);
+        }
+        BCryptCloseAlgorithmProvider(alg, 0);
+    }
     h->push(hash, H);
 }
 

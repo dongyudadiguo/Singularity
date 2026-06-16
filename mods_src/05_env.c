@@ -98,22 +98,28 @@ static void draw_clear(u8 *p, uint32_t n) {
 }
 
 static void draw_text(u8 *p, uint32_t n) {
-    // stack: x, y, color_rgb, text
-    if (n < 1 || !hdc) return;
-    
-    Buf text = h->pop();
-    uint32_t color = h->pop().n >= 4 ? U(h->pop().p) : 0xFFFFFF;
-    int y = h->pop().n >= 4 ? (int)U(h->pop().p) : 0;
-    int x = h->pop().n >= 4 ? (int)U(h->pop().p) : 0;
-    
+    // stack (top first): text, color_rgb, y, x
+    if (!hdc) return;
+
+    Buf text  = h->pop();
+    Buf bcol  = h->pop();
+    Buf by    = h->pop();
+    Buf bx    = h->pop();
+
+    uint32_t color = bcol.n >= 4 ? U(bcol.p) : 0xFFFFFF;
+    int y = by.n >= 4 ? (int)U(by.p) : 0;
+    int x = bx.n >= 4 ? (int)U(bx.p) : 0;
+
     SetBkColor(hdc, RGB(0, 0, 0));
     SetTextColor(hdc, RGB(color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF));
-    
+
     char *buf = malloc(text.n + 1);
-    memcpy(buf, text.p, text.n);
-    buf[text.n] = 0;
-    TextOutA(hdc, x, y, buf, text.n);
-    free(buf);
+    if (buf) {
+        if (text.n) memcpy(buf, text.p, text.n);
+        buf[text.n] = 0;
+        TextOutA(hdc, x, y, buf, (int)text.n);
+        free(buf);
+    }
 }
 
 // IN: input operations
