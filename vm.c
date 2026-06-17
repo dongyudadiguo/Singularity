@@ -15,18 +15,7 @@ typedef unsigned char u8;
 typedef struct { u8 *p; uint32_t n; } Buf;
 typedef void (*Op)(void);
 
-// —— VM 全局（Host.cur 指向这里）——
-static struct {
-    uint32_t off; Buf f; u8 key[H];  // 帧（03_runtime 通过 (Frame*)h->cur 访问）
-    Buf st[N]; int sn;               // 数据栈
-    struct { u8 id[H]; Op fn; } ins[N]; int in; // 指令表
-    struct { u8 k[H]; Buf f; } ov[N]; int on;   // OV 缓存
-} vm;
-
-static SOCKET sock;
-void (*imp)(void);
-
-// —— Host 接口（mods 通过 h->pay/plen 获取当前 payload）——
+// —— Host 接口 ——
 typedef struct {
     void (*op)(u8 *, Op);
     void (*op_name)(char *, Op);
@@ -35,19 +24,42 @@ typedef struct {
     void (*override)(u8 *, u8 *, DWORD);
     void (*touch)(void);
     Buf (*rpc)(uint8_t, u8 *, DWORD);
-    void *run, *enter;
+    void (*run)(u8 *);
+    void (*enter)(u8 *);
     void (*adv)(void);
     void (*push)(u8 *, uint32_t);
     Buf (*pop)(void);
     Buf *(*top)(void);
     void *cur;
     u8 *pay; uint32_t plen;
+    void (*next)(void);
+    void (*next_noadv)(void);
 } Host;
+
+typedef struct { uint32_t off; Buf f; u8 key[H]; } Frame;
+typedef struct { u8 id[H]; Op fn; } Ins;
+typedef struct { u8 key[H]; Buf f; } Ov;
+
+// —— 全局状态 ——
+static SOCKET sock;
+static Host host;
+static Frame cur, ret[N];
+static int active, rn;
+static Ins ins[N]; int in;
+static Ov ov[N]; int on;
+static Buf st[N]; int sn;
+static u8 ZERO[H];
+void (*imp)(void);
+
+// —— 前向声明 ——
+static void cvm_step(void);
+static void root(void);
 
 // —— 工具 ——
 static uint32_t U(u8 *p) { uint32_t x; memcpy(&x,p,4); return x; }
 static int Z(u8 *p) { for (int i=0;i<H;i++) if(p[i]) return 0; return 1; }
 static Buf B(u8 *p, DWORD n) { Buf b={malloc(n),n}; if(n) memcpy(b.p,p,n); return b; }
+static void T(char *s, u8 o[H]) { DWORD n=strlen(s);memset(o,0,H);memcpy(o,s,n>H?H:n); }
 
 // —— 网络 ——
 static int xfer(u8 *p, int n, int rd) {
@@ -64,57 +76,87 @@ Buf cvm_rpc(uint8_t op, u8 *body, DWORD len) {
     return b;
 }
 
-void cvm_push(u8 *p, uint32_t n) { vm.st[vm.sn++]=B(p,n); }
-Buf cvm_pop(void) { Buf z={0}; return vm.sn?vm.st[--vm.sn]:z; }
-Buf *cvm_top(void) { return vm.sn?vm.st+vm.sn-1:0; }
+// —— 栈 ——
+void cvm_push(u8 *p, uint32_t n) { st[sn++]=B(p,n); }
+Buf cvm_pop(void) { Buf z={0}; return sn?st[--sn]:z; }
+Buf *cvm_top(void) { return sn?st+sn-1:0; }
 
-void cvm_op(u8 *id, Op fn) { memcpy(vm.ins[vm.in].id,id,H); vm.ins[vm.in++].fn=fn; }
-void cvm_op_name(char *s, Op fn) {
-    u8 id[H]; DWORD n=strlen(s); memset(id,0,H); memcpy(id,s,n>H?H:n); cvm_op(id,fn); }
-void cvm_del(u8 *id) { memcpy(vm.ins[vm.in].id,id,H); vm.ins[vm.in++].fn=0; }
-void cvm_del_name(char *s) {
-    u8 id[H]; DWORD n=strlen(s); memset(id,0,H); memcpy(id,s,n>H?H:n); cvm_del(id); }
+// —— 指令表 ——
+void cvm_op(u8 *id, Op fn) { memcpy(ins[in].id,id,H); ins[in++].fn=fn; }
+void cvm_op_name(char *s, Op fn) { u8 id[H]; T(s,id); cvm_op(id,fn); }
+void cvm_del(u8 *id) { memcpy(ins[in].id,id,H); ins[in++].fn=0; }
+void cvm_del_name(char *s) { u8 id[H]; T(s,id); cvm_del(id); }
+static Op opfind(u8 *id) { for(int i=in-1;i>=0;i--) if(!memcmp(ins[i].id,id,H)) return ins[i].fn; return 0; }
 
-static Op opfind(u8 *id) {
-    for(int i=vm.in-1;i>=0;i--) if(!memcmp(vm.ins[i].id,id,H)) return vm.ins[i].fn;
-    return 0;
-}
-
-static void *ovfind(u8 *k) {
-    for(int i=vm.on-1;i>=0;i--) if(!memcmp(vm.ov[i].k,k,H)) return vm.ov+i;
-    return 0;
-}
+// —— OV 缓存 ——
+static Ov *ovfind(u8 *k) { for(int i=on-1;i>=0;i--) if(!memcmp(ov[i].key,k,H)) return ov+i; return 0; }
 void cvm_override(u8 *k, u8 *f, DWORD n) {
-    void *o=ovfind(k);
-    if(!o){o=vm.ov+vm.on++;memcpy(o,k,H);}
-    free(((Buf*)((u8*)o+H))->p);
-    *((Buf*)((u8*)o+H))=B(f,n);
+    Ov *o=ovfind(k); if(!o){o=ov+on++;memcpy(o->key,k,H);}
+    free(o->f.p); o->f=B(f,n);
 }
-void cvm_touch(void) { cvm_override(vm.key,vm.f.p,vm.f.n); }
+void cvm_touch(void) { cvm_override(cur.key,cur.f.p,cur.f.n); }
 
-// —— 块获取：OV缓存 > 服务器 CHILDREN[0]→FILE ——
+// —— 块获取 ——
 static Buf getfile(u8 *k) {
-    void *o=ovfind(k);
-    if(o) return B(((Buf*)((u8*)o+H))->p,((Buf*)((u8*)o+H))->n);
+    Ov *o=ovfind(k); if(o) return B(o->f.p,o->f.n);
     u8 h[H]={0}; Buf r=cvm_rpc(OP_CHILDREN,k,H);
-    if(r.p&&r.n>=36) memcpy(h,r.p+4,H); free(r.p);
+    if(r.p&&r.n>=36) memcpy(h,r.p+4,H);
+    free(r.p);
     return cvm_rpc(OP_FILE,h,H);
 }
 
-// —— resolve：当前32字节匹配指令→返回；否则getfirstchild→递归 ——
-static Op resolve(u8 *tok) {
-    Op fn=opfind(tok); if(fn)return fn;
-    Buf child=getfile(tok);
-    if(!child.p||child.n<H){free(child.p);return 0;}
-    fn=opfind(child.p); free(child.p); return fn;
+// —— 标准持续 ——
+void cvm_adv(void) { cur.off += H + U(cur.f.p + cur.off + H); }
+
+static void cvm_next(void) {
+    if(active) cvm_adv();
+    imp = cvm_step;
+}
+static void cvm_next_noadv(void) {
+    imp = cvm_step;
 }
 
-// —— 标准持续：ptr += 32 + *(int*)ptr ——
-static void adv(void) { vm.off+=H+U(vm.f.p+vm.off+H); }
+// —— 帧管理 ——
+void cvm_enter(u8 *k) {
+    if(active) { cvm_adv(); ret[rn++] = cur; }
+    cur.f = getfile(k);
+    cur.off = 0;
+    memcpy(cur.key, k, H);
+    active = 1;
+}
+static void leave(void) {
+    free(cur.f.p);
+    if(rn) cur = ret[--rn];
+    else active = 0;
+}
 
-// —— boot ——
+// —— RUN ——
+void cvm_run(u8 *h) {
+    Op op = opfind(h);
+    if(op) {
+        host.pay = cur.f.p + cur.off + H + 4;
+        host.plen = U(cur.f.p + cur.off + H) - 4;
+        imp = op;
+    } else { cvm_enter(h); }
+}
+
+// —— 步进 ——
+static void cvm_step(void) {
+    if(!active) { imp = root; return; }
+    if(cur.off + H > cur.f.n || Z(cur.f.p + cur.off)) { leave(); return; }
+    cvm_run(cur.f.p + cur.off);
+}
+
+// —— 根 ——
+static void root(void) {
+    cvm_enter(ZERO);
+    imp = cvm_step;
+}
+
+// —— 加载 mods ——
 void boot(void) {
-    u8 ZERO[H]={0};
+    memset(ZERO,0,H);
+
     WSADATA w;struct sockaddr_in a={0};int to=5000;
     WSAStartup(MAKEWORD(2,2),&w);
     sock=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
@@ -125,7 +167,15 @@ void boot(void) {
     if(connect(sock,(struct sockaddr*)&a,sizeof a)==SOCKET_ERROR)
         {closesocket(sock);sock=INVALID_SOCKET;}
 
-    // 加载 mods
+    host.op=cvm_op;host.op_name=cvm_op_name;host.del=cvm_del;host.del_name=cvm_del_name;
+    host.override=cvm_override;host.touch=cvm_touch;host.rpc=cvm_rpc;
+    host.run=cvm_run;host.enter=cvm_enter;host.adv=cvm_adv;
+    host.push=cvm_push;host.pop=cvm_pop;host.top=cvm_top;
+    host.cur=&cur;host.pay=0;host.plen=0;
+    host.next=cvm_next;host.next_noadv=cvm_next_noadv;
+
+    { HWND h=CreateWindowExA(0,"STATIC","",0,0,0,0,0,0,0,0,0); if(h) DestroyWindow(h); }
+
     WIN32_FIND_DATAA fd;char ms[N][MAX_PATH];int n=0;
     HANDLE hf=FindFirstFileA("mods\\*.dll",&fd);
     if(hf!=INVALID_HANDLE_VALUE){
@@ -133,26 +183,16 @@ void boot(void) {
         while(n<N&&FindNextFileA(hf,&fd));FindClose(hf);
         for(int i=0;i<n-1;i++)for(int j=i+1;j<n;j++)
             if(lstrcmpiA(ms[i],ms[j])>0){char t[MAX_PATH];lstrcpyA(t,ms[i]);lstrcpyA(ms[i],ms[j]);lstrcpyA(ms[j],t);}
-        Host hh;
-        hh.op=cvm_op;hh.op_name=cvm_op_name;hh.del=cvm_del;hh.del_name=cvm_del_name;
-        hh.override=cvm_override;hh.touch=cvm_touch;hh.rpc=cvm_rpc;
-        hh.run=0;hh.enter=0;hh.adv=adv;
-        hh.push=cvm_push;hh.pop=cvm_pop;hh.top=cvm_top;hh.cur=&vm;
-        hh.pay=0;hh.plen=0;
         for(int i=0;i<n;i++){HMODULE m=LoadLibraryA(ms[i]);
             if(m){void(*init)(Host*);*(void**)&init=GetProcAddress(m,"cvm_init");
-                if(init)init(&hh);}}
+                if(init)init(&host);}}
     }
 
-    vm.f=getfile(ZERO);memcpy(vm.key,ZERO,H);vm.off=0;
-    imp=resolve(vm.f.p);
+    imp = root;
+    Sleep(100);
 }
 
-int main()
-{
-boot();
-    while (1)
-    {
-        if(imp){imp();} // imp = 当前指令函数，op 内部负责推进或跳转
-    }
+int main() {
+    boot();
+    while (1) { imp(); }
 }

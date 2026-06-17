@@ -1,0 +1,14 @@
+boot start
+sock ok
+mods\00_core.dll
+mods\01_graph.dll
+mods\02_block.dll
+mods\03_runtime.dll
+mods\04_data.dll
+mods\05_env.dll
+boot done
+main loop
+root
+enter
+enter ok
+root imp=step

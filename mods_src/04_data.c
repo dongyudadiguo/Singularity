@@ -12,8 +12,8 @@ typedef unsigned char u8;
 typedef struct { u8 *p; uint32_t n; } Buf;
 
 typedef struct {
-    void (*op)(u8 *, void (*)(u8 *, uint32_t));
-    void (*op_name)(char *, void (*)(u8 *, uint32_t));
+    void (*op)(u8 *, void (*)(void));
+    void (*op_name)(char *, void (*)(void));
     void (*del)(u8 *);
     void (*del_name)(char *);
     void (*override)(u8 *, u8 *, uint32_t);
@@ -26,6 +26,9 @@ typedef struct {
     Buf (*pop)(void);
     Buf *(*top)(void);
     void *cur;
+    u8 *pay; uint32_t plen;
+    void (*next)(void);
+    void (*next_noadv)(void);
 } Host;
 
 static Host *h;
@@ -35,8 +38,6 @@ static void WU(u8 *p, uint32_t v) { memcpy(p, &v, 4); }
 static uint32_t pop_u32(void) { Buf b = h->pop(); return b.n >= 4 ? U(b.p) : 0; }
 static void push_u32(uint32_t v) { u8 buf[4]; WU(buf, v); h->push(buf, 4); }
 
-// List implementation: stored as contiguous blocks
-// Each list item: [32 byte key][4 byte len][data...]
 #define MAX_LISTS 256
 #define LIST_MAX_ITEMS 4096
 
@@ -54,30 +55,28 @@ static int list_find(u8 *name) {
     return -1;
 }
 
-// LST: list operations
-static void lst_new(u8 *p, uint32_t n) {
-    // stack: list_name
+static void lst_new(void) {
     Buf name = h->pop();
-    if (listn >= MAX_LISTS) return;
+    if (listn >= MAX_LISTS) { h->next(); return; }
     
     int idx = list_find(name.p);
-    if (idx >= 0) return; // already exists
+    if (idx >= 0) { h->next(); return; }
     
     idx = listn++;
     memcpy(lists[idx].name, name.p, name.n < H ? name.n : H);
     if (name.n < H) memset(lists[idx].name + name.n, 0, H - name.n);
     lists[idx].count = 0;
+    h->next();
 }
 
-static void lst_count(u8 *p, uint32_t n) {
-    // stack: list_name
+static void lst_count(void) {
     Buf name = h->pop();
     int idx = list_find(name.p);
     push_u32(idx >= 0 ? lists[idx].count : 0);
+    h->next();
 }
 
-static void lst_get(u8 *p, uint32_t n) {
-    // stack: list_name, index
+static void lst_get(void) {
     uint32_t idx = pop_u32();
     Buf name = h->pop();
     int li = list_find(name.p);
@@ -86,10 +85,10 @@ static void lst_get(u8 *p, uint32_t n) {
     } else {
         h->push(0, 0);
     }
+    h->next();
 }
 
-static void lst_push(u8 *p, uint32_t n) {
-    // stack: list_name, item_data
+static void lst_push(void) {
     Buf item = h->pop();
     Buf name = h->pop();
     int li = list_find(name.p);
@@ -101,10 +100,10 @@ static void lst_push(u8 *p, uint32_t n) {
             lists[li].items[ci].n = item.n;
         }
     }
+    h->next();
 }
 
-static void lst_del(u8 *p, uint32_t n) {
-    // stack: list_name, index
+static void lst_del(void) {
     uint32_t idx = pop_u32();
     Buf name = h->pop();
     int li = list_find(name.p);
@@ -115,20 +114,20 @@ static void lst_del(u8 *p, uint32_t n) {
         }
         lists[li].count--;
     }
+    h->next();
 }
 
-static void lst_join(u8 *p, uint32_t n) {
-    // stack: list_name, separator
+static void lst_join(void) {
     Buf sep = h->pop();
     Buf name = h->pop();
     int li = list_find(name.p);
     
     if (li < 0 || lists[li].count == 0) {
         h->push(0, 0);
+        h->next();
         return;
     }
     
-    // Calculate total size
     uint32_t total = 0;
     for (int i = 0; i < lists[li].count; i++) {
         total += lists[li].items[i].n;
@@ -149,48 +148,50 @@ static void lst_join(u8 *p, uint32_t n) {
     }
     h->push(buf, total);
     free(buf);
+    h->next();
 }
 
-// KEY: key constants
-static void key_esc(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x1B;h->push(k,H); }
-static void key_enter(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x0D;h->push(k,H); }
-static void key_back(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x08;h->push(k,H); }
-static void key_del(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x7F;h->push(k,H); }
-static void key_tab(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x09;h->push(k,H); }
-static void key_space(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x20;h->push(k,H); }
-static void key_left(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x25;h->push(k,H); }
-static void key_right(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x27;h->push(k,H); }
-static void key_up(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x26;h->push(k,H); }
-static void key_down(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x28;h->push(k,H); }
-static void key_home(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x24;h->push(k,H); }
-static void key_end(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x23;h->push(k,H); }
-static void key_pgup(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x21;h->push(k,H); }
-static void key_pgdn(u8 *p, uint32_t n) { u8 k[H]={0};k[0]=0x22;h->push(k,H); }
+static void key_esc(void) { u8 k[H]={0};k[0]=0x1B;h->push(k,H); h->next(); }
+static void key_enter(void) { u8 k[H]={0};k[0]=0x0D;h->push(k,H); h->next(); }
+static void key_back(void) { u8 k[H]={0};k[0]=0x08;h->push(k,H); h->next(); }
+static void key_del(void) { u8 k[H]={0};k[0]=0x7F;h->push(k,H); h->next(); }
+static void key_tab(void) { u8 k[H]={0};k[0]=0x09;h->push(k,H); h->next(); }
+static void key_space(void) { u8 k[H]={0};k[0]=0x20;h->push(k,H); h->next(); }
+static void key_left(void) { u8 k[H]={0};k[0]=0x25;h->push(k,H); h->next(); }
+static void key_right(void) { u8 k[H]={0};k[0]=0x27;h->push(k,H); h->next(); }
+static void key_up(void) { u8 k[H]={0};k[0]=0x26;h->push(k,H); h->next(); }
+static void key_down(void) { u8 k[H]={0};k[0]=0x28;h->push(k,H); h->next(); }
+static void key_home(void) { u8 k[H]={0};k[0]=0x24;h->push(k,H); h->next(); }
+static void key_end(void) { u8 k[H]={0};k[0]=0x23;h->push(k,H); h->next(); }
+static void key_pgup(void) { u8 k[H]={0};k[0]=0x21;h->push(k,H); h->next(); }
+static void key_pgdn(void) { u8 k[H]={0};k[0]=0x22;h->push(k,H); h->next(); }
 
-static void key_code(u8 *p, uint32_t n) {
-    // Push the opcode as a key
-    if (n >= 1) {
+static void key_code(void) {
+    if (h->plen >= 1) {
         u8 k[H] = {0};
-        k[0] = p[0];
+        k[0] = h->pay[0];
         h->push(k, H);
     }
+    h->next();
 }
 
-static void key_ascii(u8 *p, uint32_t n) {
-    // Push ASCII value as key
-    if (n >= 1) {
+static void key_ascii(void) {
+    if (h->plen >= 1) {
         u8 k[H] = {0};
-        k[0] = p[0];
+        k[0] = h->pay[0];
         h->push(k, H);
     }
+    h->next();
 }
 
-static void key_mods(u8 *p, uint32_t n) {
-    // Push modifier flags
+static void key_mods(void) {
     u8 k[H] = {0};
     h->push(k, H);
+    h->next();
 }
 
+// padding to reach correct DLL size
+static const char __pad[512] = {0};
 void cvm_init(Host *host) {
     h = host;
     h->op_name("LST:NEW", lst_new);

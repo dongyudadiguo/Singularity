@@ -19,8 +19,8 @@ typedef struct {
 } Frame;
 
 typedef struct {
-    void (*op)(u8 *, void (*)(u8 *, uint32_t));
-    void (*op_name)(char *, void (*)(u8 *, uint32_t));
+    void (*op)(u8 *, void (*)(void));
+    void (*op_name)(char *, void (*)(void));
     void (*del)(u8 *);
     void (*del_name)(char *);
     void (*override)(u8 *, u8 *, uint32_t);
@@ -33,6 +33,9 @@ typedef struct {
     Buf (*pop)(void);
     Buf *(*top)(void);
     void *cur;
+    u8 *pay; uint32_t plen;
+    void (*next)(void);
+    void (*next_noadv)(void);
 } Host;
 
 static Host *h;
@@ -47,101 +50,117 @@ static void push_u32(uint32_t v) { u8 buf[4]; WU(buf, v); h->push(buf, 4); }
 static Frame *curf(void) { return (Frame *)h->cur; }
 
 // RUN, ENTER, ADV: execution control
-static void run_op(u8 *p, uint32_t n) {
-    if (n >= H) h->run(p);
+static void run_op(void) {
+    if (h->plen >= H) h->run(h->pay);
+    else h->next();
 }
 
-static void enter_op(u8 *p, uint32_t n) {
-    if (n >= H) h->enter(p);
+static void enter_op(void) {
+    if (h->plen >= H) h->enter(h->pay);
+    else h->next();
 }
 
-static void adv_op(u8 *p, uint32_t n) {
+static void adv_op(void) {
     h->adv();
+    h->next_noadv();
 }
 
-// OV: override operations
-static void ov_set(u8 *p, uint32_t n) {
+static void ov_set(void) {
     Buf file = h->pop();
     Buf key = h->pop();
     h->override(key.p, file.p, file.n);
+    h->next();
 }
 
-static void ov_touch(u8 *p, uint32_t n) {
+static void ov_touch(void) {
     h->touch();
+    h->next();
 }
 
 // FLOW: control flow — directly manipulate curf()->off
-static void flow_jmp(u8 *p, uint32_t n) {
-    if (n >= 4) {
+static void flow_jmp(void) {
+    if (h->plen >= 4) {
         Frame *f = curf();
-        if (f) f->off = U(p);
+        if (f) f->off = U(h->pay);
     }
+    h->next_noadv();
 }
 
-static void flow_jrel(u8 *p, uint32_t n) {
-    if (n >= 4) {
+static void flow_jrel(void) {
+    if (h->plen >= 4) {
         Frame *f = curf();
-        if (f) f->off += (int32_t)U(p);
+        if (f) f->off += (int32_t)U(h->pay);
     }
+    h->next_noadv();
 }
 
-static void flow_jz(u8 *p, uint32_t n) {
+static void flow_jz(void) {
     Buf cond = h->pop();
     int is_zero = 1;
     for (uint32_t i = 0; i < cond.n; i++) {
         if (cond.p[i]) { is_zero = 0; break; }
     }
-    if (is_zero && n >= 4) {
+    if (is_zero && h->plen >= 4) {
         Frame *f = curf();
-        if (f) f->off = U(p);
+        if (f) f->off = U(h->pay);
+        h->next_noadv();
+    } else {
+        h->next();
     }
 }
 
-static void flow_jnz(u8 *p, uint32_t n) {
+static void flow_jnz(void) {
     Buf cond = h->pop();
     int is_zero = 1;
     for (uint32_t i = 0; i < cond.n; i++) {
         if (cond.p[i]) { is_zero = 0; break; }
     }
-    if (!is_zero && n >= 4) {
+    if (!is_zero && h->plen >= 4) {
         Frame *f = curf();
-        if (f) f->off = U(p);
+        if (f) f->off = U(h->pay);
+        h->next_noadv();
+    } else {
+        h->next();
     }
 }
 
-static void flow_next(u8 *p, uint32_t n) {
-    h->adv();
+static void flow_next(void) {
+    h->next();
 }
 
-static void flow_end(u8 *p, uint32_t n) {
-    // End current frame: set off past end marker
+static void flow_end(void) {
     Frame *f = curf();
     if (f) f->off = f->f.n;
+    h->next_noadv();
 }
 
 // CUR: current frame info — read from curf()
-static void cur_file(u8 *p, uint32_t n) {
+static void cur_file(void) {
     Frame *f = curf();
     if (f && f->f.p) h->push(f->f.p, f->f.n);
     else h->push(0, 0);
+    h->next();
 }
 
-static void cur_key(u8 *p, uint32_t n) {
+static void cur_key(void) {
     Frame *f = curf();
     if (f) h->push(f->key, H);
     else { u8 z[H]; memset(z, 0, H); h->push(z, H); }
+    h->next();
 }
 
-static void cur_off(u8 *p, uint32_t n) {
+static void cur_off(void) {
     Frame *f = curf();
     push_u32(f ? f->off : 0);
+    h->next();
 }
 
-static void cur_setoff(u8 *p, uint32_t n) {
-    if (n >= 4) {
+static void cur_setoff(void) {
+    if (h->plen >= 4) {
         Frame *f = curf();
-        if (f) f->off = U(p);
+        if (f) f->off = U(h->pay);
     }
+    h->next();
 }
 
 // VAR: variables (512 slots, key is 32-byte token)
@@ -156,7 +175,7 @@ static int var_find(u8 *key) {
     return -1;
 }
 
-static void var_set(u8 *p, uint32_t n) {
+static void var_set(void) {
     Buf val = h->pop();
     Buf key = h->pop();
     
@@ -177,9 +196,10 @@ static void var_set(u8 *p, uint32_t n) {
             vars[idx].val.n = val.n;
         }
     }
+    h->next();
 }
 
-static void var_get(u8 *p, uint32_t n) {
+static void var_get(void) {
     Buf key = h->pop();
     int idx = var_find(key.p);
     if (idx >= 0 && vars[idx].val.p) {
@@ -187,15 +207,17 @@ static void var_get(u8 *p, uint32_t n) {
     } else {
         h->push(0, 0);
     }
+    h->next();
 }
 
-static void var_has(u8 *p, uint32_t n) {
+static void var_has(void) {
     Buf key = h->pop();
     int idx = var_find(key.p);
     push_u32(idx >= 0 ? 1 : 0);
+    h->next();
 }
 
-static void var_del(u8 *p, uint32_t n) {
+static void var_del(void) {
     Buf key = h->pop();
     int idx = var_find(key.p);
     if (idx >= 0) {
@@ -207,15 +229,17 @@ static void var_del(u8 *p, uint32_t n) {
         }
         varn--;
     }
+    h->next();
 }
 
-static void var_clear(u8 *p, uint32_t n) {
+static void var_clear(void) {
     for (int i = 0; i < varn; i++) {
         free(vars[i].val.p);
         vars[i].val.p = 0;
         vars[i].val.n = 0;
     }
     varn = 0;
+    h->next();
 }
 
 void cvm_init(Host *host) {

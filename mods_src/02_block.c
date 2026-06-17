@@ -12,8 +12,8 @@ typedef unsigned char u8;
 typedef struct { u8 *p; uint32_t n; } Buf;
 
 typedef struct {
-    void (*op)(u8 *, void (*)(u8 *, uint32_t));
-    void (*op_name)(char *, void (*)(u8 *, uint32_t));
+    void (*op)(u8 *, void (*)(void));
+    void (*op_name)(char *, void (*)(void));
     void (*del)(u8 *);
     void (*del_name)(char *);
     void (*override)(u8 *, u8 *, uint32_t);
@@ -26,6 +26,9 @@ typedef struct {
     Buf (*pop)(void);
     Buf *(*top)(void);
     void *cur;
+    u8 *pay; uint32_t plen;
+    void (*next)(void);
+    void (*next_noadv)(void);
 } Host;
 
 static Host *h;
@@ -56,27 +59,29 @@ static uint32_t blk_count(u8 *data, uint32_t len) {
 }
 
 // BLK: block operations
-static void blk_count_op(u8 *p, uint32_t n) {
+static void blk_count_op(void) {
     Buf b = h->pop();
     push_u32(blk_count(b.p, b.n));
+    h->next();
 }
 
-static void blk_hash(u8 *p, uint32_t n) {
+static void blk_hash(void) {
     uint32_t idx = pop_u32();
     Buf b = h->pop();
     uint32_t cnt = 0;
     uint32_t off = 0;
     u8 z[H]; memset(z,0,H);
     while (off + H <= b.n && !is_zero(b.p + off, H)) {
-        if (cnt == idx) { h->push(b.p + off, H); return; }
+        if (cnt == idx) { h->push(b.p + off, H); h->next(); return; }
         uint32_t span = U(b.p + off + H);
         off += H + span;
         cnt++;
     }
     h->push(z, H);
+    h->next();
 }
 
-static void blk_data(u8 *p, uint32_t n) {
+static void blk_data(void) {
     uint32_t idx = pop_u32();
     Buf b = h->pop();
     uint32_t cnt = 0;
@@ -85,6 +90,7 @@ static void blk_data(u8 *p, uint32_t n) {
         if (cnt == idx) {
             uint32_t span = U(b.p + off + H);
             h->push(b.p + off + H + 4, span);
+            h->next();
             return;
         }
         uint32_t span = U(b.p + off + H);
@@ -92,9 +98,10 @@ static void blk_data(u8 *p, uint32_t n) {
         cnt++;
     }
     h->push(0, 0);
+    h->next();
 }
 
-static void blk_item(u8 *p, uint32_t n) {
+static void blk_item(void) {
     uint32_t idx = pop_u32();
     Buf b = h->pop();
     uint32_t cnt = 0;
@@ -103,6 +110,7 @@ static void blk_item(u8 *p, uint32_t n) {
         if (cnt == idx) {
             uint32_t span = U(b.p + off + H);
             h->push(b.p + off, H + 4 + span);
+            h->next();
             return;
         }
         uint32_t span = U(b.p + off + H);
@@ -110,10 +118,10 @@ static void blk_item(u8 *p, uint32_t n) {
         cnt++;
     }
     h->push(0, 0);
+    h->next();
 }
 
-static void blk_end(u8 *p, uint32_t n) {
-    // Return offset of end marker (after last block or 0 if empty)
+static void blk_end(void) {
     Buf b = h->pop();
     uint32_t off = 0;
     while (off + H <= b.n && !is_zero(b.p + off, H)) {
@@ -121,11 +129,10 @@ static void blk_end(u8 *p, uint32_t n) {
         off += H + span;
     }
     push_u32(off);
+    h->next();
 }
 
-static void blk_ins(u8 *p, uint32_t n) {
-    // stack: block_hash, data, insert_at_offset
-    // insert a new block at offset
+static void blk_ins(void) {
     uint32_t at = pop_u32();
     Buf data = h->pop();
     Buf b = h->pop();
@@ -146,16 +153,15 @@ static void blk_ins(u8 *p, uint32_t n) {
     h->push(new_data, new_len);
     free(item);
     free(new_data);
+    h->next();
 }
 
-static void blk_del(u8 *p, uint32_t n) {
-    // stack: block_hash, delete_at_offset
+static void blk_del(void) {
     uint32_t at = pop_u32();
     Buf b = h->pop();
     
-    if (at >= b.n) { h->push(b.p, b.n); return; }
+    if (at >= b.n) { h->push(b.p, b.n); h->next(); return; }
     
-    // Find the end of the block at 'at'
     uint32_t span = at + H <= b.n ? U(b.p + at + H) : 0;
     uint32_t item_len = H + 4 + span;
     
@@ -165,20 +171,17 @@ static void blk_del(u8 *p, uint32_t n) {
     memcpy(new_data + at, b.p + at + item_len, b.n - at - item_len);
     h->push(new_data, new_len);
     free(new_data);
+    h->next();
 }
 
-static void blk_set(u8 *p, uint32_t n) {
-    // stack: block_hash, new_data, block_hash_to_replace
-    // Replace the data of a block (keeping its hash)
+static void blk_set(void) {
     Buf old_hash = h->pop();
     Buf new_data = h->pop();
     Buf b = h->pop();
     
-    // Find the block with old_hash and replace its data
     uint32_t off = 0;
     while (off + H <= b.n && !is_zero(b.p + off, H)) {
         if (!memcmp(b.p + off, old_hash.p, H)) {
-            // Found it, rebuild
             uint32_t old_span = U(b.p + off + H);
             uint32_t before = off;
             uint32_t after_start = off + H + 4 + old_span;
@@ -187,18 +190,20 @@ static void blk_set(u8 *p, uint32_t n) {
             uint32_t new_len = before + H + 4 + new_data.n + after_len;
             u8 *new_data_buf = malloc(new_len);
             memcpy(new_data_buf, b.p, before);
-            memcpy(new_data_buf + before, b.p + off, H); // keep hash
+            memcpy(new_data_buf + before, b.p + off, H);
             WU(new_data_buf + before + H, new_data.n);
             memcpy(new_data_buf + before + H + 4, new_data.p, new_data.n);
             memcpy(new_data_buf + before + H + 4 + new_data.n, b.p + after_start, after_len);
             h->push(new_data_buf, new_len);
             free(new_data_buf);
+            h->next();
             return;
         }
         uint32_t span = U(b.p + off + H);
         off += H + 4 + span;
     }
     h->push(b.p, b.n);
+    h->next();
 }
 
 void cvm_init(Host *host) {

@@ -14,8 +14,8 @@ typedef unsigned char u8;
 typedef struct { u8 *p; uint32_t n; } Buf;
 
 typedef struct {
-    void (*op)(u8 *, void (*)(u8 *, uint32_t));
-    void (*op_name)(char *, void (*)(u8 *, uint32_t));
+    void (*op)(u8 *, void (*)(void));
+    void (*op_name)(char *, void (*)(void));
     void (*del)(u8 *);
     void (*del_name)(char *);
     void (*override)(u8 *, u8 *, uint32_t);
@@ -28,6 +28,9 @@ typedef struct {
     Buf (*pop)(void);
     Buf *(*top)(void);
     void *cur;
+    u8 *pay; uint32_t plen;
+    void (*next)(void);
+    void (*next_noadv)(void);
 } Host;
 
 static Host *h;
@@ -36,37 +39,41 @@ static uint32_t U(u8 *p) { uint32_t x; memcpy(&x, p, 4); return x; }
 static void WU(u8 *p, uint32_t v) { memcpy(p, &v, 4); }
 
 // ST: stack operations
-static void st_push(u8 *p, uint32_t n) {
-    Buf b = { p, n };
-    h->push(p, n);
+static void st_push(void) {
+    h->push(h->pay, h->plen);
+    h->next();
 }
 
-static void st_pop(u8 *p, uint32_t n) {
+static void st_pop(void) {
     Buf b = h->pop();
     if (b.p) h->push(b.p, b.n);
+    h->next();
 }
 
-static void st_dup(u8 *p, uint32_t n) {
+static void st_dup(void) {
     Buf *t = h->top();
     if (t && t->p) h->push(t->p, t->n);
+    h->next();
 }
 
-static void st_swap(u8 *p, uint32_t n) {
+static void st_swap(void) {
     Buf b1 = h->pop();
     Buf b2 = h->pop();
     if (b1.p) h->push(b1.p, b1.n);
     if (b2.p) h->push(b2.p, b2.n);
+    h->next();
 }
 
 // BY: byte operations
-static void by_len(u8 *p, uint32_t n) {
+static void by_len(void) {
     Buf b = h->pop();
     uint32_t len = b.n;
     u8 buf[4]; WU(buf, len);
     h->push(buf, 4);
+    h->next();
 }
 
-static void by_cat(u8 *p, uint32_t n) {
+static void by_cat(void) {
     Buf b2 = h->pop();
     Buf b1 = h->pop();
     uint32_t total = b1.n + b2.n;
@@ -75,19 +82,21 @@ static void by_cat(u8 *p, uint32_t n) {
     if (b2.n) memcpy(buf + b1.n, b2.p, b2.n);
     h->push(buf, total);
     free(buf);
+    h->next();
 }
 
-static void by_slice(u8 *p, uint32_t n) {
-    if (n < 8) return;
-    uint32_t off = U(p);
-    uint32_t len = U(p + 4);
+static void by_slice(void) {
+    if (h->plen < 8) { h->next(); return; }
+    uint32_t off = U(h->pay);
+    uint32_t len = U(h->pay + 4);
     Buf b = h->pop();
-    if (off >= b.n) { h->push(0, 0); return; }
+    if (off >= b.n) { h->push(0, 0); h->next(); return; }
     if (off + len > b.n) len = b.n - off;
     h->push(b.p + off, len);
+    h->next();
 }
 
-static void by_cmp(u8 *p, uint32_t n) {
+static void by_cmp(void) {
     Buf b2 = h->pop();
     Buf b1 = h->pop();
     uint32_t mn = b1.n < b2.n ? b1.n : b2.n;
@@ -95,15 +104,17 @@ static void by_cmp(u8 *p, uint32_t n) {
     if (!r) r = (int)b1.n - (int)b2.n;
     u8 buf[4]; WU(buf, r < 0 ? 1 : r > 0 ? 2 : 0);
     h->push(buf, 4);
+    h->next();
 }
 
-static void by_take32(u8 *p, uint32_t n) {
+static void by_take32(void) {
     Buf b = h->pop();
     if (b.n >= H) h->push(b.p, H);
     else { u8 buf[H]; memset(buf, 0, H); memcpy(buf, b.p, b.n); h->push(buf, H); }
+    h->next();
 }
 
-static void by_hex(u8 *p, uint32_t n) {
+static void by_hex(void) {
     Buf b = h->pop();
     u8 *buf = malloc(b.n * 2);
     for (uint32_t i = 0; i < b.n; i++) {
@@ -112,9 +123,10 @@ static void by_hex(u8 *p, uint32_t n) {
     }
     h->push(buf, b.n * 2);
     free(buf);
+    h->next();
 }
 
-static void by_unhex(u8 *p, uint32_t n) {
+static void by_unhex(void) {
     Buf b = h->pop();
     u8 *buf = malloc(b.n / 2);
     for (uint32_t i = 0; i < b.n / 2; i++) {
@@ -125,11 +137,13 @@ static void by_unhex(u8 *p, uint32_t n) {
     }
     h->push(buf, b.n / 2);
     free(buf);
+    h->next();
 }
 
 // U32: 32-bit unsigned integer operations
-static void u32_const(u8 *p, uint32_t n) {
-    h->push(p, 4);
+static void u32_const(void) {
+    h->push(h->pay, 4);
+    h->next();
 }
 
 static uint32_t pop_u32(void) {
@@ -142,26 +156,26 @@ static void push_u32(uint32_t v) {
     h->push(buf, 4);
 }
 
-static void u32_add(u8 *p, uint32_t n) { push_u32(pop_u32() + pop_u32()); }
-static void u32_sub(u8 *p, uint32_t n) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(a - b); }
-static void u32_mul(u8 *p, uint32_t n) { push_u32(pop_u32() * pop_u32()); }
-static void u32_div(u8 *p, uint32_t n) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(b ? a / b : 0); }
-static void u32_mod(u8 *p, uint32_t n) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(b ? a % b : 0); }
-static void u32_eq(u8 *p, uint32_t n) { push_u32(pop_u32() == pop_u32() ? 1 : 0); }
-static void u32_lt(u8 *p, uint32_t n) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(a < b ? 1 : 0); }
-static void u32_gt(u8 *p, uint32_t n) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(a > b ? 1 : 0); }
-static void u32_and(u8 *p, uint32_t n) { push_u32(pop_u32() & pop_u32()); }
-static void u32_or(u8 *p, uint32_t n) { push_u32(pop_u32() | pop_u32()); }
-static void u32_xor(u8 *p, uint32_t n) { push_u32(pop_u32() ^ pop_u32()); }
-static void u32_shl(u8 *p, uint32_t n) { uint32_t s = pop_u32(); uint32_t v = pop_u32(); push_u32(v << s); }
-static void u32_shr(u8 *p, uint32_t n) { uint32_t s = pop_u32(); uint32_t v = pop_u32(); push_u32(v >> s); }
-static void u32_not(u8 *p, uint32_t n) { push_u32(~pop_u32()); }
-static void u32_frombe(u8 *p, uint32_t n) { Buf b = h->pop(); if(b.n>=4){uint32_t v=((uint32_t)b.p[0]<<24)|((uint32_t)b.p[1]<<16)|((uint32_t)b.p[2]<<8)|b.p[3];push_u32(v);} }
-static void u32_tobe(u8 *p, uint32_t n) { uint32_t v=pop_u32();u8 buf[4];buf[0]=v>>24;buf[1]=v>>16;buf[2]=v>>8;buf[3]=v;h->push(buf,4); }
-static void u32_dec(u8 *p, uint32_t n) { uint32_t v=pop_u32();char buf[16];int len=snprintf(buf,sizeof buf,"%u",v);h->push((u8*)buf,len); }
+static void u32_add(void) { push_u32(pop_u32() + pop_u32()); h->next(); }
+static void u32_sub(void) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(a - b); h->next(); }
+static void u32_mul(void) { push_u32(pop_u32() * pop_u32()); h->next(); }
+static void u32_div(void) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(b ? a / b : 0); h->next(); }
+static void u32_mod(void) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(b ? a % b : 0); h->next(); }
+static void u32_eq(void) { push_u32(pop_u32() == pop_u32() ? 1 : 0); h->next(); }
+static void u32_lt(void) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(a < b ? 1 : 0); h->next(); }
+static void u32_gt(void) { uint32_t b = pop_u32(); uint32_t a = pop_u32(); push_u32(a > b ? 1 : 0); h->next(); }
+static void u32_and(void) { push_u32(pop_u32() & pop_u32()); h->next(); }
+static void u32_or(void) { push_u32(pop_u32() | pop_u32()); h->next(); }
+static void u32_xor(void) { push_u32(pop_u32() ^ pop_u32()); h->next(); }
+static void u32_shl(void) { uint32_t s = pop_u32(); uint32_t v = pop_u32(); push_u32(v << s); h->next(); }
+static void u32_shr(void) { uint32_t s = pop_u32(); uint32_t v = pop_u32(); push_u32(v >> s); h->next(); }
+static void u32_not(void) { push_u32(~pop_u32()); h->next(); }
+static void u32_frombe(void) { Buf b = h->pop(); if(b.n>=4){uint32_t v=((uint32_t)b.p[0]<<24)|((uint32_t)b.p[1]<<16)|((uint32_t)b.p[2]<<8)|b.p[3];push_u32(v);} h->next(); }
+static void u32_tobe(void) { uint32_t v=pop_u32();u8 buf[4];buf[0]=v>>24;buf[1]=v>>16;buf[2]=v>>8;buf[3]=v;h->push(buf,4); h->next(); }
+static void u32_dec(void) { uint32_t v=pop_u32();char buf[16];int len=snprintf(buf,sizeof buf,"%u",v);h->push((u8*)buf,len); h->next(); }
 
 // HASH: sha256
-static void hash_sha256(u8 *p, uint32_t n) {
+static void hash_sha256(void) {
     Buf b = h->pop();
     u8 hash[H];
     BCRYPT_ALG_HANDLE  alg = NULL;
@@ -175,14 +189,15 @@ static void hash_sha256(u8 *p, uint32_t n) {
         BCryptCloseAlgorithmProvider(alg, 0);
     }
     h->push(hash, H);
+    h->next();
 }
 
 // TOK: token operations
-static void tok_zero(u8 *p, uint32_t n) { u8 z[H]; memset(z,0,H); h->push(z,H); }
-static void tok_make(u8 *p, uint32_t n) { Buf b=h->pop(); u8 t[H]; memset(t,0,H); memcpy(t,b.p,b.n<H?b.n:H); h->push(t,H); }
-static void tok_text(u8 *p, uint32_t n) { Buf b=h->pop(); h->push(b.p,b.n); }
-static void tok_iszero(u8 *p, uint32_t n) { Buf b=h->pop(); int z=1; for(uint32_t i=0;i<b.n&&i<H;i++)if(b.p[i])z=0; push_u32(z); }
-static void tok_eq(u8 *p, uint32_t n) { Buf b2=h->pop();Buf b1=h->pop();push_u32(b1.n==b2.n&&!memcmp(b1.p,b2.p,b1.n)?1:0); }
+static void tok_zero(void) { u8 z[H]; memset(z,0,H); h->push(z,H); h->next(); }
+static void tok_make(void) { Buf b=h->pop(); u8 t[H]; memset(t,0,H); memcpy(t,b.p,b.n<H?b.n:H); h->push(t,H); h->next(); }
+static void tok_text(void) { Buf b=h->pop(); h->push(b.p,b.n); h->next(); }
+static void tok_iszero(void) { Buf b=h->pop(); int z=1; for(uint32_t i=0;i<b.n&&i<H;i++)if(b.p[i])z=0; push_u32(z); h->next(); }
+static void tok_eq(void) { Buf b2=h->pop();Buf b1=h->pop();push_u32(b1.n==b2.n&&!memcmp(b1.p,b2.p,b1.n)?1:0); h->next(); }
 
 void cvm_init(Host *host) {
     h = host;

@@ -13,8 +13,8 @@ typedef unsigned char u8;
 typedef struct { u8 *p; uint32_t n; } Buf;
 
 typedef struct {
-    void (*op)(u8 *, void (*)(u8 *, uint32_t));
-    void (*op_name)(char *, void (*)(u8 *, uint32_t));
+    void (*op)(u8 *, void (*)(void));
+    void (*op_name)(char *, void (*)(void));
     void (*del)(u8 *);
     void (*del_name)(char *);
     void (*override)(u8 *, u8 *, uint32_t);
@@ -27,6 +27,9 @@ typedef struct {
     Buf (*pop)(void);
     Buf *(*top)(void);
     void *cur;
+    u8 *pay; uint32_t plen;
+    void (*next)(void);
+    void (*next_noadv)(void);
 } Host;
 
 static Host *h;
@@ -41,8 +44,8 @@ static HDC hdc = NULL;
 static int win_w = 800, win_h = 600;
 
 // UI: window operations
-static void ui_open(u8 *p, uint32_t n) {
-    if (hwnd) return;
+static void ui_open(void) {
+    if (hwnd) { h->next(); return; }
     
     WNDCLASSEXA wc = {0};
     wc.cbSize = sizeof(wc);
@@ -51,26 +54,28 @@ static void ui_open(u8 *p, uint32_t n) {
     wc.lpszClassName = "CVMWnd";
     RegisterClassExA(&wc);
     
-    uint32_t w = 800, h = 600;
-    if (n >= 8) { w = U(p); h = U(p + 4); }
-    win_w = w; win_h = h;
+    uint32_t w = 800, height = 600;
+    if (h->plen >= 8) { w = U(h->pay); height = U(h->pay + 4); }
+    win_w = w; win_h = height;
     
     hwnd = CreateWindowExA(0, "CVMWnd", "CVM", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, w, h, NULL, NULL, wc.hInstance, NULL);
+        CW_USEDEFAULT, CW_USEDEFAULT, w, height, NULL, NULL, wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
     hdc = GetDC(hwnd);
+    h->next();
 }
 
-static void ui_poll(u8 *p, uint32_t n) {
+static void ui_poll(void) {
     MSG msg;
     while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);
         DispatchMessageA(&msg);
     }
+    h->next();
 }
 
-static void ui_size(u8 *p, uint32_t n) {
+static void ui_size(void) {
     if (hwnd) {
         RECT r; GetWindowRect(hwnd, &r);
         push_u32(r.right - r.left);
@@ -79,27 +84,28 @@ static void ui_size(u8 *p, uint32_t n) {
         push_u32(0);
         push_u32(0);
     }
+    h->next();
 }
 
-static void ui_close(u8 *p, uint32_t n) {
+static void ui_close(void) {
     if (hdc) { ReleaseDC(hwnd, hdc); hdc = NULL; }
     if (hwnd) { DestroyWindow(hwnd); hwnd = NULL; }
     UnregisterClassA("CVMWnd", GetModuleHandleA(NULL));
+    h->next();
 }
 
-// DRAW: drawing operations
-static void draw_clear(u8 *p, uint32_t n) {
+static void draw_clear(void) {
     if (hdc) {
         RECT r = {0, 0, win_w, win_h};
         HBRUSH brush = CreateSolidBrush(RGB(0, 0, 0));
         FillRect(hdc, &r, brush);
         DeleteObject(brush);
     }
+    h->next();
 }
 
-static void draw_text(u8 *p, uint32_t n) {
-    // stack (top first): text, color_rgb, y, x
-    if (!hdc) return;
+static void draw_text(void) {
+    if (!hdc) { h->next(); return; }
 
     Buf text  = h->pop();
     Buf bcol  = h->pop();
@@ -120,15 +126,13 @@ static void draw_text(u8 *p, uint32_t n) {
         TextOutA(hdc, x, y, buf, (int)text.n);
         free(buf);
     }
+    h->next();
 }
 
-// IN: input operations
-static void in_key(u8 *p, uint32_t n) {
-    // Return last key pressed, or zero token
+static void in_key(void) {
     u8 k[H] = {0};
     
     if (hwnd) {
-        // Check for key press
         for (int vkey = 0; vkey < 256; vkey++) {
             if (GetAsyncKeyState(vkey) & 0x8000) {
                 k[0] = (u8)vkey;
@@ -138,11 +142,11 @@ static void in_key(u8 *p, uint32_t n) {
     }
     
     h->push(k, H);
+    h->next();
 }
 
-// CLIP: clipboard operations
-static void clip_get(u8 *p, uint32_t n) {
-    if (!OpenClipboard(NULL)) { h->push(0, 0); return; }
+static void clip_get(void) {
+    if (!OpenClipboard(NULL)) { h->push(0, 0); h->next(); return; }
     
     HANDLE hData = GetClipboardData(CF_TEXT);
     if (hData) {
@@ -157,11 +161,12 @@ static void clip_get(u8 *p, uint32_t n) {
         }
     }
     CloseClipboard();
+    h->next();
 }
 
-static void clip_set(u8 *p, uint32_t n) {
+static void clip_set(void) {
     Buf text = h->pop();
-    if (!OpenClipboard(NULL)) return;
+    if (!OpenClipboard(NULL)) { h->next(); return; }
     
     EmptyClipboard();
     HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, text.n + 1);
@@ -173,32 +178,32 @@ static void clip_set(u8 *p, uint32_t n) {
         SetClipboardData(CF_TEXT, hMem);
     }
     CloseClipboard();
+    h->next();
 }
 
-// TIME: time operations
-static void time_ms(u8 *p, uint32_t n) {
+static void time_ms(void) {
     push_u32(GetTickCount());
+    h->next();
 }
 
-static void time_sleep(u8 *p, uint32_t n) {
-    if (n >= 4) {
-        DWORD ms = U(p);
+static void time_sleep(void) {
+    if (h->plen >= 4) {
+        DWORD ms = U(h->pay);
         Sleep(ms);
     }
+    h->next();
 }
 
-// FS: file system operations
-static void fs_read(u8 *p, uint32_t n) {
-    // stack: filepath
+static void fs_read(void) {
     Buf path = h->pop();
-    if (path.n == 0) { h->push(0, 0); return; }
+    if (path.n == 0) { h->push(0, 0); h->next(); return; }
     
     char filepath[MAX_PATH];
     memcpy(filepath, path.p, path.n < MAX_PATH ? path.n : MAX_PATH - 1);
     filepath[path.n < MAX_PATH ? path.n : MAX_PATH - 1] = 0;
     
     HANDLE hf = CreateFileA(filepath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    if (hf == INVALID_HANDLE_VALUE) { h->push(0, 0); return; }
+    if (hf == INVALID_HANDLE_VALUE) { h->push(0, 0); h->next(); return; }
     
     DWORD size = GetFileSize(hf, NULL);
     u8 *buf = malloc(size);
@@ -208,10 +213,10 @@ static void fs_read(u8 *p, uint32_t n) {
     
     h->push(buf, read);
     free(buf);
+    h->next();
 }
 
-static void fs_write(u8 *p, uint32_t n) {
-    // stack: filepath, data
+static void fs_write(void) {
     Buf data = h->pop();
     Buf path = h->pop();
     
@@ -220,15 +225,15 @@ static void fs_write(u8 *p, uint32_t n) {
     filepath[path.n < MAX_PATH ? path.n : MAX_PATH - 1] = 0;
     
     HANDLE hf = CreateFileA(filepath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
-    if (hf == INVALID_HANDLE_VALUE) return;
+    if (hf == INVALID_HANDLE_VALUE) { h->next(); return; }
     
     DWORD written;
     WriteFile(hf, data.p, data.n, &written, NULL);
     CloseHandle(hf);
+    h->next();
 }
 
-static void fs_exists(u8 *p, uint32_t n) {
-    // stack: filepath
+static void fs_exists(void) {
     Buf path = h->pop();
     
     char filepath[MAX_PATH];
@@ -237,12 +242,14 @@ static void fs_exists(u8 *p, uint32_t n) {
     
     DWORD attrs = GetFileAttributesA(filepath);
     push_u32(attrs != INVALID_FILE_ATTRIBUTES ? 1 : 0);
+    h->next();
 }
 
-static void fs_cwd(u8 *p, uint32_t n) {
+static void fs_cwd(void) {
     char cwd[MAX_PATH];
     GetCurrentDirectoryA(MAX_PATH, cwd);
     h->push((u8 *)cwd, strlen(cwd));
+    h->next();
 }
 
 void cvm_init(Host *host) {

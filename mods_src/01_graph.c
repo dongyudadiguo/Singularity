@@ -12,8 +12,8 @@ typedef unsigned char u8;
 typedef struct { u8 *p; uint32_t n; } Buf;
 
 typedef struct {
-    void (*op)(u8 *, void (*)(u8 *, uint32_t));
-    void (*op_name)(char *, void (*)(u8 *, uint32_t));
+    void (*op)(u8 *, void (*)(void));
+    void (*op_name)(char *, void (*)(void));
     void (*del)(u8 *);
     void (*del_name)(char *);
     void (*override)(u8 *, u8 *, uint32_t);
@@ -26,6 +26,9 @@ typedef struct {
     Buf (*pop)(void);
     Buf *(*top)(void);
     void *cur;
+    u8 *pay; uint32_t plen;
+    void (*next)(void);
+    void (*next_noadv)(void);
 } Host;
 
 static Host *h;
@@ -49,80 +52,92 @@ static uint32_t pop_u32(void) { Buf b=h->pop(); return b.n>=4?U(b.p):0; }
 static void push_u32(uint32_t v) { u8 buf[4];WU(buf,v); h->push(buf,4); }
 
 // G: graph operations
-static void g_register(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_REGISTER, p, n);
+static void g_register(void) {
+    Buf r = h->rpc(OP_REGISTER, h->pay, h->plen);
     h->push(r.p, r.n);
+    h->next();
 }
 
-static void g_upload(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_UPLOAD, p, n);
+static void g_upload(void) {
+    Buf r = h->rpc(OP_UPLOAD, h->pay, h->plen);
     h->push(r.p, r.n);
+    h->next();
 }
 
-static void g_file(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_FILE, p, n);
+static void g_file(void) {
+    Buf r = h->rpc(OP_FILE, h->pay, h->plen);
     h->push(r.p, r.n);
+    h->next();
 }
 
-static void g_childs(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+static void g_childs(void) {
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     h->push(r.p, r.n);
+    h->next();
 }
 
-static void g_child0(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+static void g_child0(void) {
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     if (r.p && r.n >= 36) h->push(r.p + 4, H);
     else { u8 z[H]; memset(z,0,H); h->push(z,H); }
+    h->next();
 }
 
-static void g_edge(u8 *p, uint32_t n) {
-    h->rpc(OP_EDGE, p, n);
+static void g_edge(void) {
+    h->rpc(OP_EDGE, h->pay, h->plen);
+    h->next();
 }
 
-static void g_vote(u8 *p, uint32_t n) {
-    h->rpc(OP_VOTE, p, n);
+static void g_vote(void) {
+    h->rpc(OP_VOTE, h->pay, h->plen);
+    h->next();
 }
 
-static void g_uget(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_UGET, p, n);
+static void g_uget(void) {
+    Buf r = h->rpc(OP_UGET, h->pay, h->plen);
     h->push(r.p, r.n);
+    h->next();
 }
 
-static void g_uset(u8 *p, uint32_t n) {
-    h->rpc(OP_USET, p, n);
+static void g_uset(void) {
+    h->rpc(OP_USET, h->pay, h->plen);
+    h->next();
 }
 
 // CH: children operations
-static void ch_count(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+static void ch_count(void) {
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     uint32_t cnt = 0;
     if (r.p && r.n >= 4) cnt = U(r.p);
     push_u32(cnt);
+    h->next();
 }
 
-static void ch_first(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+static void ch_first(void) {
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     if (r.p && r.n >= 36) h->push(r.p + 4, H);
     else { u8 z[H]; memset(z,0,H); h->push(z,H); }
+    h->next();
 }
 
-static void ch_hash(u8 *p, uint32_t n) {
-    // pop index, then parent hash, return child hash at index
+static void ch_hash(void) {
     uint32_t idx = pop_u32();
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     if (r.p && r.n >= 4) {
         uint32_t cnt = U(r.p);
         if (idx < cnt && r.n >= 4 + (idx+1)*36) {
             h->push(r.p + 4 + idx*36, H);
+            h->next();
             return;
         }
     }
     u8 z[H]; memset(z,0,H); h->push(z,H);
+    h->next();
 }
 
-static void ch_score(u8 *p, uint32_t n) {
+static void ch_score(void) {
     uint32_t idx = pop_u32();
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     if (r.p && r.n >= 4) {
         uint32_t cnt = U(r.p);
         if (idx < cnt && r.n >= 4 + (idx+1)*36) {
@@ -130,36 +145,42 @@ static void ch_score(u8 *p, uint32_t n) {
             int64_t score = 0;
             for (int i = 0; i < 4; i++) score = (score << 8) | row[H + i];
             push_u32((uint32_t)score);
+            h->next();
             return;
         }
     }
     push_u32(0);
+    h->next();
 }
 
-static void ch_row(u8 *p, uint32_t n) {
+static void ch_row(void) {
     uint32_t idx = pop_u32();
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     if (r.p && r.n >= 4) {
         uint32_t cnt = U(r.p);
         if (idx < cnt && r.n >= 4 + (idx+1)*36) {
             h->push(r.p + 4 + idx*36, 36);
+            h->next();
             return;
         }
     }
     u8 z[36]; memset(z,0,36); h->push(z,36);
+    h->next();
 }
 
-static void ch_hashes(u8 *p, uint32_t n) {
-    Buf r = h->rpc(OP_CHILDREN, p, n);
+static void ch_hashes(void) {
+    Buf r = h->rpc(OP_CHILDREN, h->pay, h->plen);
     if (r.p && r.n >= 4) {
         uint32_t cnt = U(r.p);
         uint32_t total = cnt * H;
         if (4 + total <= r.n) {
             h->push(r.p + 4, total);
+            h->next();
             return;
         }
     }
     h->push(0, 0);
+    h->next();
 }
 
 void cvm_init(Host *host) {
