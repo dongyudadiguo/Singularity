@@ -1,73 +1,172 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+
+/* ============================================================
+ *  你只需要看 main() 之上的"第3/4层"。
+ *  上面两层是轮子，看不懂可以无视。
+ * ============================================================ */
 
 typedef unsigned char u8;
-typedef unsigned u32;
-typedef u8 H[32];
+typedef unsigned int  u32;
+typedef unsigned short u16;
+typedef u8 Hash[32];          /* 一个 32 字节的哈希 */
 
-int conn;
-H cur;
-void (*imp)();
+/* ============================================================
+ *  第1层：底层细节（网络字节搬运、字节序）—— 不用关心
+ * ============================================================ */
 
-void readn(void *b, u32 n) {
-    u32 g = 0;
-    while (g < n) {
-        int r = read(conn, (char*)b+g, n-g);
-        if (r < 1) exit(1);
-        g += r;
+static SOCKET g_conn;
+
+static void net_must(int ok)      { if (!ok) exit(1); }
+static void put_u32(u8 *p, u32 v) { p[0]=v>>24; p[1]=v>>16; p[2]=v>>8; p[3]=v; }
+static u32  get_u32(const u8 *p)  { return (u32)p[0]<<24|p[1]<<16|p[2]<<8|p[3]; }
+
+static void net_read(void *buf, u32 n) {
+    u32 got = 0;
+    while (got < n) {
+        int r = recv(g_conn, (char*)buf + got, n - got, 0);
+        net_must(r > 0);
+        got += r;
     }
 }
 
-void send_op(u8 op, void *body, u32 len) {
-    u8 h[5] = {op, len>>24, len>>16, len>>8, len};
-    write(conn, h, 5);
-    if (len) write(conn, body, len);
+static void net_write(const void *buf, u32 n) {
+    if (n) net_must(send(g_conn, (const char*)buf, n, 0) > 0);
 }
 
-u8 *recv_op() {
-    u8 h[5];
-    readn(h, 5);
-    u32 l = (u32)h[1]<<24 | h[2]<<16 | h[3]<<8 | h[4];
-    u8 *b = malloc(l+1);
-    readn(b, l);
-    return b;
-}
-
-void cvm_upload(void *d, u32 l, H out) { send_op(2, d, l); u8 *b = recv_op(); memcpy(out, b, 32); free(b); }
-u8 *cvm_file(H h)          { send_op(3, h, 32); return recv_op(); }
-void cvm_edge(H p, H c)    { u8 b[64]; memcpy(b,p,32); memcpy(b+32,c,32); send_op(4, b, 64); free(recv_op()); }
-void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, b+4, 32); free(b); }
-
-typedef void (*Fn)();
-struct { H h; Fn f; } tab[256];
-int ntab;
-void reg(H h, Fn f) { memcpy(tab[ntab].h, h, 32); tab[ntab].f = f; ntab++; }
-Fn find(H h) { for (int i=0;i<ntab;i++) if (!memcmp(tab[i].h,h,32)) return tab[i].f; return 0; }
-
-void walk() {
-    Fn f;
-    while (!(f = find(cur))) {
-        H n;
-        cvm_firstchild(cur, n);
-        memcpy(cur, n, 32);
-    }
-    imp = f;
-}
-
-void boot() {
-    conn = socket(AF_INET, SOCK_STREAM, 0);
+static void net_connect(const char *ip, u16 port) {
+    WSADATA w; WSAStartup(MAKEWORD(2,2), &w);
+    g_conn = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in a = {0};
     a.sin_family = AF_INET;
-    a.sin_port = htons(9000);
-    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
-    connect(conn, (void*)&a, sizeof(a));
-    memset(cur, 0, 32);
-    walk();
+    a.sin_port   = htons(port);
+    inet_pton(AF_INET, ip, &a.sin_addr);
+    net_must(connect(g_conn, (struct sockaddr*)&a, sizeof(a)) == 0);
 }
 
+/* ============================================================
+ *  第2层：协议层（一问一答）—— 一般不用改
+ *  消息格式：[1字节操作码][4字节长度][数据...]
+ * ============================================================ */
+
+static void msg_send(u8 op, const void *body, u32 len) {
+    u8 head[5];
+    head[0] = op;
+    put_u32(head + 1, len);
+    net_write(head, 5);
+    net_write(body, len);
+}
+
+static u8 *msg_recv(u32 *out_len) {
+    u8 head[5];
+    net_read(head, 5);
+    u32 len = get_u32(head + 1);
+    u8 *body = malloc(len + 1);
+    net_read(body, len);
+    body[len] = 0;
+    if (out_len) *out_len = len;
+    return body;
+}
+
+static void msg_call_ignore(u8 op, const void *body, u32 len) {
+    msg_send(op, body, len);
+    free(msg_recv(NULL));
+}
+
+/* ============================================================
+ *  第3层：高层语义（★ 你主要看这里 ★）
+ * ============================================================ */
+
+/* 上传一段数据，服务器返回它的哈希 */
+static void cvm_upload(const void *data, u32 len, Hash out_hash) {
+    msg_send(2, data, len);
+    u8 *reply = msg_recv(NULL);
+    memcpy(out_hash, reply, 32);
+    free(reply);
+}
+
+/* 按哈希取回文件内容；out_len 可为 NULL。返回内存需 free()。 */
+static u8 *cvm_load_file(const Hash h, u32 *out_len) {
+    msg_send(3, h, 32);
+    return msg_recv(out_len);
+}
+
+/* 在 parent -> child 之间连一条边 */
+static void cvm_link(const Hash parent, const Hash child) {
+    u8 pair[64];
+    memcpy(pair,      parent, 32);
+    memcpy(pair + 32, child,  32);
+    msg_call_ignore(4, pair, 64);
+}
+
+/* 取 parent 的第一个孩子，写入 out_child */
+static void cvm_first_child(const Hash parent, Hash out_child) {
+    msg_send(5, parent, 32);
+    u8 *reply = msg_recv(NULL);
+    memcpy(out_child, reply + 4, 32);   /* 跳过前4字节 */
+    free(reply);
+}
+
+/* ============================================================
+ *  第4层：业务逻辑（哈希 -> 处理函数 的表，沿孩子往下走）
+ * ============================================================ */
+
+typedef void (*Handler)(void);
+
+static struct { Hash h; Handler fn; } g_table[256];
+static int g_table_n;
+
+static void handler_register(const Hash h, Handler fn) {
+    if (g_table_n >= (int)(sizeof g_table / sizeof g_table[0])) return;
+    memcpy(g_table[g_table_n].h, h, 32);
+    g_table[g_table_n].fn = fn;
+    g_table_n++;
+}
+
+static Handler handler_lookup(const Hash h) {
+    for (int i = 0; i < g_table_n; i++)
+        if (!memcmp(g_table[i].h, h, 32))
+            return g_table[i].fn;
+    return NULL;
+}
+
+/* 从 start 出发顺着"第一个孩子"往下找，落在某个已登记节点上 */
+static Handler resolve_handler(Hash start) {
+    Hash cur;
+    memcpy(cur, start, 32);
+
+    Handler fn;
+    while (!(fn = handler_lookup(cur))) {
+        Hash child, zero = {0};
+        memset(child, 0, 32);
+        cvm_first_child(cur, child);
+        if (!memcmp(child, zero, 32)) {     /* 没孩子了 -> 找不到 */
+            fprintf(stderr, "no handler found\n");
+            exit(1);
+        }
+        memcpy(cur, child, 32);
+    }
+    memcpy(start, cur, 32);
+    return fn;
+}
+
+/* ============================================================
+ *  原 main 依赖的两个东西：全局 imp + boot()
+ * ============================================================ */
+
+static Handler imp;     /* main 会反复调用它 */
+
+/* 连服务器，从根节点解析出处理函数，存进 imp */
+static void boot(void) {
+    net_connect("127.0.0.1", 9000);
+    Hash root;
+    memset(root, 0, 32);
+    imp = resolve_handler(root);
+}
+
+/* ★ 不改动 ★ */
 int main() { boot(); while (1) imp(); }
