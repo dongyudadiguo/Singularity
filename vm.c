@@ -3,6 +3,7 @@
 #include <string.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #pragma comment(lib, "ws2_32.lib")
 
 typedef unsigned char u8;
@@ -43,10 +44,14 @@ void cvm_edge(H p, H c)    { u8 b[64]; memcpy(b,p,32); memcpy(b+32,c,32); send_o
 void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, b+4, 32); free(b); }
 
 typedef void (*Fn)();
-struct { H h; Fn f; } tab[256];
-int ntab;
-void reg(H h, Fn f) { memcpy(tab[ntab].h, h, 32); tab[ntab].f = f; ntab++; }
-Fn find(H h) { for (int i=0;i<ntab;i++) if (!memcmp(tab[i].h,h,32)) return tab[i].f; return 0; }
+
+Fn find(H h) {
+    char path[64] = "mods/";
+    for (int i = 0; i < 32; i++) sprintf(path+5+i*2, "%02x", h[i]);
+    strcat(path, ".dll");
+    HMODULE m = LoadLibraryA(path);
+    return m ? (Fn)GetProcAddress(m, "run") : 0;
+}
 
 void walk() {
     Fn f;
