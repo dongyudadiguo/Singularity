@@ -1,9 +1,73 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+int conn;
+H cur;
 void (*imp)();
 
-int main()
-{
-    while (1)
-    {
-        imp();
+void readn(void *b, u32 n) {
+    u32 g = 0;
+    while (g < n) {
+        int r = read(conn, (char*)b+g, n-g);
+        if (r < 1) exit(1);
+        g += r;
     }
 }
+
+void send_op(u8 op, void *body, u32 len) {
+    u8 h[5] = {op, len>>24, len>>16, len>>8, len};
+    write(conn, h, 5);
+    if (len) write(conn, body, len);
+}
+
+u8 *recv_op() {
+    u8 h[5];
+    readn(h, 5);
+    u32 l = (u32)h[1]<<24 | h[2]<<16 | h[3]<<8 | h[4];
+    u8 *b = malloc(l+1);
+    readn(b, l);
+    return b;
+}
+
+void cvm_upload(void *d, u32 l, H out) { send_op(2, d, l); u8 *b = recv_op(); memcpy(out, b, 32); free(b); }
+u8 *cvm_file(H h)          { send_op(3, h, 32); return recv_op(); }
+void cvm_edge(H p, H c)    { u8 b[64]; memcpy(b,p,32); memcpy(b+32,c,32); send_op(4, b, 64); free(recv_op()); }
+void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, b+4, 32); free(b); }
+
+typedef void (*Fn)();
+struct { H h; Fn f; } tab[256];
+int ntab;
+void reg(H h, Fn f) { memcpy(tab[ntab].h, h, 32); tab[ntab].f = f; ntab++; }
+Fn find(H h) { for (int i=0;i<ntab;i++) if (!memcmp(tab[i].h,h,32)) return tab[i].f; return 0; }
+
+void walk() {
+    Fn f;
+    while (!(f = find(cur))) {
+        H n;
+        cvm_firstchild(cur, n);
+        memcpy(cur, n, 32);
+    }
+    imp = f;
+}
+
+void boot() {
+    conn = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    a.sin_port = htons(9000);
+    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+    connect(conn, (void*)&a, sizeof(a));
+    memset(cur, 0, 32);
+    walk();
+}
+
+int main() { boot(); while (1) imp(); }
