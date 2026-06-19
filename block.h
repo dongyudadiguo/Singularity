@@ -5,14 +5,19 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <wincrypt.h>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
 
+#ifndef CVM_TYPES_DEFINED
+#define CVM_TYPES_DEFINED
 typedef unsigned char u8;
 typedef unsigned u32;
+typedef unsigned long long u64;
 typedef u8 H[32];
+#endif
 
 static int sha256(const u8 *data, u32 len, H out) {
     HCRYPTPROV hp = 0;
@@ -159,6 +164,7 @@ static void _uq_put(const H h) {
 static u8* _last_data;
 static u32 _last_len;
 static H   _last_hash;
+static H  *_last_ph;
 
 static u8* block(H *ph, u32 *out_len) {
     if (_last_data) {
@@ -168,12 +174,7 @@ static u8* block(H *ph, u32 *out_len) {
             _cstore(nh, _last_data, _last_len);
             _uq_start();
             _uq_put(nh);
-            // Delete old cache file? Better not to, keep for DAG consistency.
-            // But we do need to update the hash back to the caller if they passed it.
-            // Since they passed *ph (which pointed to the old hash), we update it.
-            // Wait, the caller's pointer to ph is what they passed. But they might have
-            // changed cur in the loop. The most robust way is to copy the new hash.
-            memcpy(*ph, nh, 32);
+            if (_last_ph) memcpy(*_last_ph, nh, 32);
         }
         free(_last_data);
         _last_data = 0;
@@ -194,6 +195,7 @@ static u8* block(H *ph, u32 *out_len) {
         _last_data[len] = 0;
         _last_len = len;
         memcpy(_last_hash, *ph, 32);
+        _last_ph = ph;
         free(d);
         if (out_len) *out_len = len;
         return _last_data;

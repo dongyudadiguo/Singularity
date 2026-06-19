@@ -5,12 +5,18 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#include "cvm_state.h"
 #pragma comment(lib, "ws2_32.lib")
 
+#ifndef CVM_TYPES_DEFINED
+#define CVM_TYPES_DEFINED
 typedef unsigned char u8;
 typedef unsigned u32;
+typedef unsigned long long u64;
 typedef u8 H[32];
+#endif
 
 #define CACHE_CAP 256
 
@@ -154,7 +160,10 @@ static int cont(u8 **pp) {
 
     void *fn = _find(tok);
     if (fn) {
+        CvmState *st = cvm_state();
+        if (st) { st->payload = ld; st->payload_len = pl; }
         ((void(*)())fn)();
+        if (st && st->ret) { st->ret = 0; return 0; }
         goto next;
     }
 
@@ -164,6 +173,8 @@ static int cont(u8 **pp) {
         u8 *rp = rd;
         cont(&rp);
         free(rd);
+        CvmState *st = cvm_state();
+        if (st && st->ret) { st->ret = 0; return 0; }
     }
 
     next:;
