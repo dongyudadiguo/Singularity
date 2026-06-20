@@ -3,10 +3,9 @@
 #include "../continue.h"
 __declspec(dllexport) void run(void) {
     CvmState *s = cvm_state();
-    if (!s || !s->payload || s->payload_len < 32) { cnext(); return; }
     H target;
     u32 len;
-    memcpy(target, s->payload, 32);
+    cvm_pop(target);
     if (s) memcpy(s->cur_hash, target, 32);
     u8 *p = block(&target, &len);
     if (!p) { cnext(); return; }
@@ -18,9 +17,7 @@ __declspec(dllexport) void run(void) {
         s->ret_jb = old;
     }
     block(0, 0);
-    if (s) {
-        memcpy(s->cur_hash, target, 32);
-        memcpy(s->payload, target, 32);
-    }
+    if (s) memcpy(s->cur_hash, target, 32);
+    cvm_push(target);
     cnext();
 }

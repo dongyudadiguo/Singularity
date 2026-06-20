@@ -4,6 +4,9 @@
 __declspec(dllexport) void run(void) {
     CvmState *s = cvm_state();
     if (!s || !s->payload || s->payload_len < 32) { cnext(); return; }
+    H cond;
+    cvm_pop(cond);
+    if (!cvm_truth(cond)) { cnext(); return; }
     H target;
     u32 len;
     memcpy(target, s->payload, 32);
