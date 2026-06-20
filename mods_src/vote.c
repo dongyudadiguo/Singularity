@@ -6,4 +6,5 @@ __declspec(dllexport) void run(void) {
     cvm_zero(out);
     if (net_vote(parent, child)) out[0] = 1;
     cvm_push(out);
+    cnext();
 }

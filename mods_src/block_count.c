@@ -7,4 +7,5 @@ __declspec(dllexport) void run(void) {
     cvm_u64_to_h(d ? bc_count(d, len) : 0, out);
     if (d) free(d);
     cvm_push(out);
+    cnext();
 }

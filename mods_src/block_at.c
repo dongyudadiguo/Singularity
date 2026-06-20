@@ -9,4 +9,5 @@ __declspec(dllexport) void run(void) {
     if (d && bc_range(d, len, (u32)cvm_h_to_u64(idx_h), &s, &e)) block_write(d + s, e - s, out);
     if (d) free(d);
     cvm_push(out);
+    cnext();
 }

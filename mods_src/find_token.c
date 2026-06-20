@@ -18,4 +18,5 @@ __declspec(dllexport) void run(void) {
         free(d);
     }
     cvm_push(out);
+    cnext();
 }

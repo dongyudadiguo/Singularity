@@ -6,6 +6,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <wincrypt.h>
+#include <setjmp.h>
 #pragma comment(lib, "advapi32.lib")
 
 #ifndef CVM_TYPES_DEFINED
@@ -31,7 +32,11 @@ typedef struct {
     u8 *payload;
     u32 payload_len;
     H cur_hash;
-    int ret;
+    u8 *chain;
+    u32 chain_len;
+    u32 off;
+    u32 span;
+    jmp_buf *ret_jb;
 } CvmState;
 
 static CvmState* cvm_state(void) {

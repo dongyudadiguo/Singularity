@@ -8,4 +8,5 @@ __declspec(dllexport) void run(void) {
     if (d && len >= 4) cvm_u64_to_h(net_u32be(d), out);
     if (d) free(d);
     cvm_push(out);
+    cnext();
 }

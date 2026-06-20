@@ -16,4 +16,5 @@ __declspec(dllexport) void run(void) {
     if (chain) free(chain);
     if (item) free(item);
     cvm_push(out);
+    cnext();
 }

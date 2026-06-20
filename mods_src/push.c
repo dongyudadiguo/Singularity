@@ -1,4 +1,5 @@
 #include "../cvm_state.h"
+#include "../continue.h"
 __declspec(dllexport) void run(void) {
     CvmState *s = cvm_state();
     H v;
@@ -8,4 +9,5 @@ __declspec(dllexport) void run(void) {
         memcpy(v, s->payload, n);
     }
     cvm_push(v);
+    cnext();
 }

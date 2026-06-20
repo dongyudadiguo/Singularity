@@ -2,6 +2,7 @@
 #define MOD_BLOCK_CHAIN_H
 
 #include "../cvm_state.h"
+#include "../continue.h"
 #include "../block.h"
 
 static u32 bc_span(u8 *p) {

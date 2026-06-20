@@ -1,4 +1,5 @@
 #include "../cvm_state.h"
+#include "../continue.h"
 #include "../block.h"
 __declspec(dllexport) void run(void) {
     H tok_h, pay_h;
@@ -25,4 +26,5 @@ __declspec(dllexport) void run(void) {
     }
     if (pay) free(pay);
     cvm_push(out_hash);
+    cnext();
 }

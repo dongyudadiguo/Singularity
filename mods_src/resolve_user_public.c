@@ -9,4 +9,5 @@ __declspec(dllexport) void run(void) {
         if (net_file(key, &d, &len)) { block_write(d, len, out); free(d); }
     }
     cvm_push(out);
+    cnext();
 }

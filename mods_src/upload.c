@@ -7,4 +7,5 @@ __declspec(dllexport) void run(void) {
     u8 *d = block_read(h, &len);
     if (d) { net_upload(d, len, out); free(d); }
     cvm_push(out);
+    cnext();
 }

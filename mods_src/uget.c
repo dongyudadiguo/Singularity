@@ -5,4 +5,5 @@ __declspec(dllexport) void run(void) {
     cvm_zero(out);
     net_uget(key, out);
     cvm_push(out);
+    cnext();
 }

@@ -1,4 +1,5 @@
 #include "../cvm_state.h"
+#include "../continue.h"
 #include "../block.h"
 __declspec(dllexport) void run(void) {
     H h, out_offset, out_length;
@@ -23,4 +24,5 @@ __declspec(dllexport) void run(void) {
         free(d);
     }
     cvm_push(out_hash);
+    cnext();
 }

@@ -1,4 +1,5 @@
 #include "../cvm_state.h"
+#include "../continue.h"
 #include "../block.h"
 __declspec(dllexport) void run(void) {
     H h1, h2;
@@ -15,4 +16,5 @@ __declspec(dllexport) void run(void) {
     if (d1) free(d1);
     if (d2) free(d2);
     cvm_push(out);
+    cnext();
 }

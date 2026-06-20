@@ -1,2 +1,4 @@
 #include "../cvm_state.h"
-__declspec(dllexport) void run(void) { cvm_scope_start(); }
+#include "../continue.h"
+__declspec(dllexport) void run(void) { cvm_scope_start();     cnext();
+}

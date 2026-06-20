@@ -2,6 +2,7 @@
 #define MOD_NET_OPS_H
 
 #include "../cvm_state.h"
+#include "../continue.h"
 #include "../block.h"
 
 static SOCKET net_sock = INVALID_SOCKET;

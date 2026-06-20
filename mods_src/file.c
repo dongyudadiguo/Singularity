@@ -7,4 +7,5 @@ __declspec(dllexport) void run(void) {
     cvm_zero(out);
     if (net_file(h, &d, &len)) { block_write(d, len, out); free(d); }
     cvm_push(out);
+    cnext();
 }
