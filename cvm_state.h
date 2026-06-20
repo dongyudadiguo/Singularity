@@ -20,6 +20,7 @@ typedef u8 H[32];
 #define CVM_STACK_CAP 256
 #define CVM_SCOPE_CAP 64
 #define CVM_VAR_CAP 64
+#define CVM_VIEW_CAP 64
 
 typedef struct { H id; H val; } CvmVar;
 typedef struct { CvmVar vars[CVM_VAR_CAP]; u32 count; } CvmScope;
@@ -37,6 +38,11 @@ typedef struct {
     u32 off;
     u32 span;
     jmp_buf *ret_jb;
+    H view_hash;
+    u64 view_index;
+    H view_hash_stack[CVM_VIEW_CAP];
+    u64 view_index_stack[CVM_VIEW_CAP];
+    u32 view_sp;
 } CvmState;
 
 static CvmState* cvm_state(void) {
