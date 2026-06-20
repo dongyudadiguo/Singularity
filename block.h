@@ -166,6 +166,34 @@ static u32 _last_len;
 static H   _last_hash;
 static H  *_last_ph;
 
+static u8* block_read(const H h, u32 *out_len) {
+    u32 len;
+    u8 *d = _cload(h, &len);
+    if (!d) {
+        d = _bfetch(h, &len);
+        if (d) {
+            _cstore(h, d, len);
+        }
+    }
+    if (out_len) *out_len = d ? len : 0;
+    return d;
+}
+
+static int block_write(const u8 *data, u32 len, H out_hash) {
+    sha256(data, len, out_hash);
+    u32 clen;
+    u8 *cd = _cload(out_hash, &clen);
+    if (cd) {
+        int same = (clen == len && memcmp(cd, data, len) == 0);
+        free(cd);
+        if (same) return 0;
+    }
+    _cstore(out_hash, data, len);
+    _uq_start();
+    _uq_put(out_hash);
+    return 1;
+}
+
 static u8* block(H *ph, u32 *out_len) {
     if (_last_data) {
         H nh;
@@ -180,14 +208,13 @@ static u8* block(H *ph, u32 *out_len) {
         _last_data = 0;
     }
 
-    u32 len;
-    u8 *d = _cload(*ph, &len);
-    if (!d) {
-        d = _bfetch(*ph, &len);
-        if (d) {
-            _cstore(*ph, d, len);
-        }
+    if (!ph) {
+        if (out_len) *out_len = 0;
+        return 0;
     }
+
+    u32 len;
+    u8 *d = block_read(*ph, &len);
 
     if (d) {
         _last_data = malloc(len + 1);

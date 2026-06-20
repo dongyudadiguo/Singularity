@@ -30,6 +30,7 @@ typedef struct {
     u32 depth;
     u8 *payload;
     u32 payload_len;
+    H cur_hash;
     int ret;
 } CvmState;
 
