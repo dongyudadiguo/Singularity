@@ -70,7 +70,7 @@ void boot() {
     struct sockaddr_in a = {0};                      
     a.sin_family = AF_INET;                          
     a.sin_port = htons(9000);                        
-    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);    
+    inet_pton(AF_INET, "118.25.42.70", &a.sin_addr);    
     connect(conn, (void*)&a, sizeof(a));             
     memset(cur, 0, 32);                              
     walk();                                          

