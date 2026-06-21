@@ -73,37 +73,73 @@ func printBlocks(blocks []builtBlock, chainHash [hashSize]byte, bootRun [hashSiz
 func buildBootEditorBlocks(t tokenMap) []builtBlock {
 	b := newBlockBuilder(t)
 
-	insert := b.block("insert_noop_call", func(c *chainBuilder) {
+	initVars := b.block("init_boot_editor_vars", func(c *chainBuilder) {
 		c.add("state_hash_get", nil)
-		c.add("state_index_get", nil)
-		c.pushHash(t.must("call"))
+		c.add("dup", nil)
+		c.varWrite("boot.editor.view")
+		c.add("dup", nil)
+		c.varWrite("boot.browser.view")
+		c.varWrite("boot.browser.token")
 		c.pushHash(t.must("noop"))
+		c.varWrite("boot.browser.token")
+		c.pushU64(0)
+		c.varWrite("boot.editor.index")
+	})
+
+	insert := b.block("insert_selected_call", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
+		c.varRead("boot.editor.index")
+		c.pushHash(t.must("call"))
+		c.varRead("boot.browser.token")
 		c.add("record_pack_hash", nil)
 		c.add("records_insert", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.editor.view")
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
 		c.add("save_boot", nil)
 	})
 
-	replace := b.block("replace_with_noop_call", func(c *chainBuilder) {
-		c.add("state_hash_get", nil)
-		c.add("state_index_get", nil)
+	replace := b.block("replace_with_selected_call", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
+		c.varRead("boot.editor.index")
 		c.pushHash(t.must("call"))
-		c.pushHash(t.must("noop"))
+		c.varRead("boot.browser.token")
 		c.add("record_pack_hash", nil)
 		c.add("records_replace", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.editor.view")
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
 		c.add("save_boot", nil)
 	})
 
 	deleteRecord := b.block("delete_selected_record", func(c *chainBuilder) {
-		c.add("state_hash_get", nil)
-		c.add("state_index_get", nil)
+		c.varRead("boot.editor.view")
+		c.varRead("boot.editor.index")
 		c.add("records_delete", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.editor.view")
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
 		c.add("save_boot", nil)
+	})
+
+	publishEdit := b.block("publish_edited_view", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
+		c.add("state_hash_set", nil)
+		c.add("publish_view", nil)
+		c.add("save_boot", nil)
+	})
+
+	browserBack := b.block("browser_back", func(c *chainBuilder) {
+		c.varRead("boot.browser.view")
+		c.add("state_hash_set", nil)
+		c.add("view_pop", nil)
+		c.add("state_hash_get", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.browser.view")
+		c.varWrite("boot.browser.token")
 	})
 
 	selectors := make([][hashSize]byte, 8)
@@ -111,25 +147,57 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		idx := uint64(i)
 		selectors[i] = b.block(fmt.Sprintf("select_row_%d", i), func(c *chainBuilder) {
 			c.pushU64(idx)
+			c.varWrite("boot.editor.index")
+		})
+	}
+
+	browserSelectors := make([][hashSize]byte, 8)
+	for i := range browserSelectors {
+		idx := uint64(i)
+		browserSelectors[i] = b.block(fmt.Sprintf("browse_child_%d", i), func(c *chainBuilder) {
+			c.varRead("boot.browser.view")
+			c.add("state_hash_set", nil)
+			c.pushU64(idx)
 			c.add("state_index_set", nil)
+			c.add("open_child", nil)
+			c.add("state_hash_get", nil)
+			c.add("dup", nil)
+			c.varWrite("boot.browser.view")
+			c.varWrite("boot.browser.token")
 		})
 	}
 
 	mouse := b.block("mouse_dispatch", func(c *chainBuilder) {
 		for i, target := range selectors {
-			c.rectContains(20, uint64(220+i*34), 900, 30)
+			c.rectContains(20, uint64(220+i*34), 590, 30)
 			c.add("call_cond_static", target[:])
 		}
-		c.rectContains(20, 560, 170, 40)
+		for i, target := range browserSelectors {
+			c.rectContains(660, uint64(220+i*34), 580, 30)
+			c.add("call_cond_static", target[:])
+		}
+		c.rectContains(20, 560, 180, 40)
 		c.add("call_cond_static", insert[:])
-		c.rectContains(210, 560, 190, 40)
+		c.rectContains(220, 560, 190, 40)
 		c.add("call_cond_static", replace[:])
-		c.rectContains(420, 560, 170, 40)
+		c.rectContains(430, 560, 170, 40)
 		c.add("call_cond_static", deleteRecord[:])
+		c.rectContains(660, 560, 130, 40)
+		c.add("call_cond_static", browserBack[:])
+		c.rectContains(810, 560, 150, 40)
+		c.add("call_cond_static", publishEdit[:])
 	})
 
 	b.block("boot_editor_entry", func(c *chainBuilder) {
-		c.pushU64(980)
+		c.varRead("boot.editor.view")
+		c.add("zero", nil)
+		c.add("eq", nil)
+		c.add("call_cond_static", initVars[:])
+
+		c.varRead("boot.browser.view")
+		c.add("state_hash_set", nil)
+
+		c.pushU64(1280)
 		c.pushU64(640)
 		c.add("surface_open", nil)
 		c.add("pop", nil)
@@ -137,37 +205,52 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushColor(18, 20, 28)
 		c.add("surface_clear", nil)
 
-		c.rect(0, 0, 980, 56)
+		c.rect(0, 0, 1280, 56)
 		c.pushColor(36, 41, 58)
 		c.add("surface_rect", nil)
 		c.text("CVM Boot Editor", 24, 18, 235, 238, 245)
-		c.text("visual self-editor: click a row, then insert/replace/delete a call noop record", 24, 78, 148, 163, 184)
-		c.text("view hash:", 24, 116, 137, 180, 250)
-		c.add("state_hash_get", nil)
+		c.text("browse token graph on the right, edit/publish the boot block on the left", 24, 78, 148, 163, 184)
+		c.text("edit hash:", 24, 116, 137, 180, 250)
+		c.varRead("boot.editor.view")
 		c.add("hash_hex", nil)
 		c.pushU64(118)
 		c.pushU64(116)
 		c.pushColor(218, 224, 235)
 		c.add("surface_text", nil)
-		c.text("selected index:", 24, 156, 137, 180, 250)
-		c.add("state_index_get", nil)
+		c.text("edit index:", 24, 156, 137, 180, 250)
+		c.varRead("boot.editor.index")
 		c.add("hash_hex", nil)
-		c.pushU64(154)
+		c.pushU64(128)
 		c.pushU64(156)
 		c.pushColor(218, 224, 235)
 		c.add("surface_text", nil)
-		c.text("records 0..7 token hashes", 24, 194, 170, 178, 196)
+		c.text("edit records 0..7", 24, 194, 170, 178, 196)
+		c.text("browser view:", 660, 116, 137, 180, 250)
+		c.varRead("boot.browser.view")
+		c.add("hash_hex", nil)
+		c.pushU64(776)
+		c.pushU64(116)
+		c.pushColor(218, 224, 235)
+		c.add("surface_text", nil)
+		c.text("selected token:", 660, 156, 137, 180, 250)
+		c.varRead("boot.browser.token")
+		c.add("hash_hex", nil)
+		c.pushU64(794)
+		c.pushU64(156)
+		c.pushColor(218, 224, 235)
+		c.add("surface_text", nil)
+		c.text("network children 0..7", 660, 194, 170, 178, 196)
 
 		for i := 0; i < 8; i++ {
 			y := uint64(220 + i*34)
-			c.rect(20, y, 900, 30)
+			c.rect(20, y, 590, 30)
 			c.pushColor(28, 32, 44)
 			c.add("surface_rect", nil)
-			c.rect(20, y, 900, 30)
+			c.rect(20, y, 590, 30)
 			c.pushColor(58, 68, 92)
 			c.add("surface_frame", nil)
 			c.text(fmt.Sprintf("%02d", i), 32, y+8, 137, 180, 250)
-			c.add("state_hash_get", nil)
+			c.varRead("boot.editor.view")
 			c.pushU64(uint64(i))
 			c.add("records_at", nil)
 			c.pushU64(0)
@@ -179,10 +262,32 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.add("surface_text", nil)
 		}
 
-		c.button("Insert call noop", 20, 560, 170, 40, 43, 116, 78)
-		c.button("Replace with call noop", 210, 560, 190, 40, 116, 94, 43)
-		c.button("Delete selected", 420, 560, 170, 40, 129, 63, 63)
-		c.text("Changes publish the edited view and save it as boot.", 610, 572, 148, 163, 184)
+		for i := 0; i < 8; i++ {
+			y := uint64(220 + i*34)
+			c.rect(660, y, 580, 30)
+			c.pushColor(24, 34, 35)
+			c.add("surface_rect", nil)
+			c.rect(660, y, 580, 30)
+			c.pushColor(58, 92, 88)
+			c.add("surface_frame", nil)
+			c.text(fmt.Sprintf("%02d", i), 672, y+8, 116, 211, 194)
+			c.varRead("boot.browser.view")
+			c.add("graph_children", nil)
+			c.pushU64(uint64(i))
+			c.add("child_at", nil)
+			c.add("hash_hex", nil)
+			c.pushU64(710)
+			c.pushU64(y + 8)
+			c.pushColor(218, 224, 235)
+			c.add("surface_text", nil)
+		}
+
+		c.button("Insert selected", 20, 560, 180, 40, 43, 116, 78)
+		c.button("Replace selected", 220, 560, 190, 40, 116, 94, 43)
+		c.button("Delete selected", 430, 560, 170, 40, 129, 63, 63)
+		c.button("Back", 660, 560, 130, 40, 47, 94, 117)
+		c.button("Publish boot", 810, 560, 150, 40, 67, 120, 86)
+		c.text("Click browser rows to enter children; insert/replace uses selected token.", 980, 572, 148, 163, 184)
 
 		c.add("surface_poll", nil)
 		c.pushU64(513)
@@ -228,6 +333,10 @@ func (c *chainBuilder) add(name string, payload []byte) {
 func (c *chainBuilder) pushU64(v uint64) { c.add("payload_u64_le", u64(v)) }
 
 func (c *chainBuilder) pushHash(h [hashSize]byte) { c.add("payload_hash32", h[:]) }
+
+func (c *chainBuilder) varRead(name string) { c.add("var_read", []byte(name)) }
+
+func (c *chainBuilder) varWrite(name string) { c.add("var_write", []byte(name)) }
 
 func (c *chainBuilder) pushColor(r, g, b uint64) {
 	c.pushU64(r)
