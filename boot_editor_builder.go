@@ -128,7 +128,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call_cond_static", deleteRecord[:])
 	})
 
-	entry := b.block("boot_editor_entry", func(c *chainBuilder) {
+	b.block("boot_editor_entry", func(c *chainBuilder) {
 		c.pushU64(980)
 		c.pushU64(640)
 		c.add("surface_open", nil)
@@ -193,7 +193,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("sleep_ms", nil)
 	})
 
-	return b.finish(entry)
+	return b.finish()
 }
 
 type blockBuilder struct {
@@ -212,7 +212,7 @@ func (b *blockBuilder) block(name string, fn func(*chainBuilder)) [hashSize]byte
 	return h
 }
 
-func (b *blockBuilder) finish(entry [hashSize]byte) []builtBlock {
+func (b *blockBuilder) finish() []builtBlock {
 	return b.blocks
 }
 

@@ -14,7 +14,7 @@ SOCKET conn;
 H cur;             
 void (*imp)();     
 
-void readn(void *b, u32 n) {                 
+void readn(void *b, u32 n) {
     u32 g = 0;                               
     while (g < n) {                          
         int r = recv(conn, (char*)b+g, n-g, 0);  
@@ -46,7 +46,7 @@ void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, 
 typedef void (*Fn)();  
 
 Fn find(H h) {                                       
-    char path[64] = "mods/";                         
+    char path[75] = "mods/";                         
     for (int i = 0; i < 32; i++) sprintf(path+5+i*2, "%02x", h[i]);  
     strcat(path, ".dll");                            
     HMODULE m = LoadLibraryA(path);                  
@@ -72,8 +72,8 @@ void boot() {
     a.sin_port = htons(9000);                        
     inet_pton(AF_INET, "118.25.42.70", &a.sin_addr);    
     connect(conn, (void*)&a, sizeof(a));             
-    memset(cur, 0, 32);                              
-    walk();                                          
+    memset(cur, 0, 32);
+    walk();
 }
 
 int main() { boot(); while (1) imp(); }  
