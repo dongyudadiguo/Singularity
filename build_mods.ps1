@@ -19,7 +19,7 @@ Get-ChildItem -LiteralPath $srcDir -Filter '*.c' | Sort-Object Name | ForEach-Ob
     $tmp = Join-Path $modsDir "$name.tmp.dll"
     $out = Join-Path $modsDir "$name.dll"
 
-    & $compiler -shared -O2 -o $tmp $src -lws2_32 -ladvapi32 2>&1 | Write-Host
+    & $compiler -shared -O2 -o $tmp $src -lws2_32 -ladvapi32 -luser32 -lgdi32 2>&1 | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "compile failed: $name" }
 
     $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $tmp

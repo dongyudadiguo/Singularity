@@ -43,6 +43,12 @@ typedef struct {
     H view_hash_stack[CVM_VIEW_CAP];
     u64 view_index_stack[CVM_VIEW_CAP];
     u32 view_sp;
+    HWND surface_hwnd;
+    u64 surface_event;
+    u64 surface_x;
+    u64 surface_y;
+    u64 surface_w;
+    u64 surface_h;
 } CvmState;
 
 static CvmState* cvm_state(void) {
