@@ -2,5 +2,5 @@
 #include "../continue.h"
 __declspec(dllexport) void run(void) {
     CvmState *s = cvm_state();
-    if (s) ccont(s->off);
+    if (s) ccont(s->chain_start);
 }

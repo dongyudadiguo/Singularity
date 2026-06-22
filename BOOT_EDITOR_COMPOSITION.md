@@ -17,6 +17,10 @@ This project now has enough generic instruction tokens to compose the first boot
 
 ## Boot Editor Blocks
 
+- Boot entry: the host calls the boot token once; the token block owns initialization, frame loop, event dispatch, and shutdown.
+- Init phase: load or initialize editor state once, open the surface once, and then call the frame loop block.
+- Frame loop: call the draw block, poll events, dispatch mouse actions, pace with `sleep_ms`, and use generic chain control to continue while the surface remains open.
+- Shutdown: when `surface_poll` reports close, stop looping and close the surface instead of returning to a host-level reload loop.
 - Open surface: put width and height as record payloads, decode them with `payload_u64_le`, then call `surface_open`.
 - Draw frame: `surface_size`, `surface_clear`, repeated row records, `rect_make`, `color_rgb`, `surface_rect`, `surface_round_rect`, `surface_round_frame`, `surface_text`.
 - Read selection: `surface_poll`, compare raw event constants, `surface_pos`, `pair_first`, `pair_second`, row `rect_contains`.
@@ -34,3 +38,5 @@ This project now has enough generic instruction tokens to compose the first boot
 ## Confirmation
 
 No boot-editor-specific instruction token is required. The catalog, fragment, and dual insert/replace actions are all block-level composition over generic tokens: numbers, stack shuffling, bytes, records, rectangles, surface events, state, variables, and graph publishing.
+
+The boot editor must remain a token-block program. If a future first-start flow cannot be composed comfortably from the current token set, fill the smallest reusable L0-L3 gap first rather than adding an application-shaped instruction or relying on the host to repeatedly restart the boot block.

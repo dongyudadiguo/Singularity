@@ -49,6 +49,7 @@ typedef struct {
     u64 surface_y;
     u64 surface_w;
     u64 surface_h;
+    u32 chain_start;
 } CvmState;
 
 static CvmState* cvm_state(void) {

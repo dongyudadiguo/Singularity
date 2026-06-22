@@ -264,19 +264,9 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call_cond_static", publishEdit[:])
 	})
 
-	b.block("boot_editor_entry", func(c *chainBuilder) {
-		c.varRead("boot.editor.view")
-		c.add("zero", nil)
-		c.add("eq", nil)
-		c.add("call_cond_static", initVars[:])
-
+	draw := b.block("boot_editor_draw", func(c *chainBuilder) {
 		c.varRead("boot.browser.view")
 		c.add("state_hash_set", nil)
-
-		c.pushU64(1280)
-		c.pushU64(640)
-		c.add("surface_open", nil)
-		c.add("pop", nil)
 
 		c.pushColor(18, 20, 28)
 		c.add("surface_clear", nil)
@@ -365,14 +355,34 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.button("Back", 660, 560, 130, 40, 47, 94, 117)
 		c.button("Publish boot", 810, 560, 150, 40, 67, 120, 86)
 		c.text("Catalog: 00 rounded-rect fragment, 01 surface, 02 records, 03 graph, 04 payload, 05 state.", 980, 572, 148, 163, 184)
+	})
 
+	frameLoop := b.block("boot_editor_frame_loop", func(c *chainBuilder) {
+		c.add("call", draw[:])
 		c.add("surface_poll", nil)
+		c.add("dup", nil)
 		c.pushU64(513)
 		c.add("eq", nil)
 		c.add("call_cond_static", mouse[:])
+		c.pushU64(0xffffffff)
+		c.add("ne", nil)
 		c.add("surface_event_clear", nil)
 		c.pushU64(33)
 		c.add("sleep_ms", nil)
+		c.add("again_cond", nil)
+	})
+
+	b.block("boot_editor_entry", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
+		c.add("zero", nil)
+		c.add("eq", nil)
+		c.add("call_cond_static", initVars[:])
+		c.pushU64(1280)
+		c.pushU64(640)
+		c.add("surface_open", nil)
+		c.add("pop", nil)
+		c.add("call", frameLoop[:])
+		c.add("surface_close", nil)
 	})
 
 	return b.finish()

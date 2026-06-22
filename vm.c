@@ -76,4 +76,4 @@ void boot() {
     walk();
 }
 
-int main() { boot(); while (1) imp(); }  
+int main() { boot(); imp(); return 0; }  

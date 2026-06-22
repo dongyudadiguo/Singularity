@@ -107,6 +107,24 @@ Use token blocks for:
 
 A token block may compose many tokens into high-level behavior. That is the intended place for specialized logic.
 
+## Boot Program Composition Rule
+
+The first-start boot program must be easy to build as token blocks from existing instruction tokens.
+
+When it is not easy, do not work around the problem by moving boot behavior into host code or adding a boot-specific instruction. First identify the missing low-level capability, then add the smallest generic token or VM semantic needed to make the composition straightforward.
+
+Acceptable fixes:
+
+- Fix generic chain control such as loop/restart behavior.
+- Fix generic call semantics so token blocks can be safely split into smaller blocks.
+- Add a reusable L0-L3 primitive that unrelated token programs can also use.
+
+Unacceptable fixes:
+
+- Add `boot_editor_loop`, `draw_boot_editor`, or other L4 application instructions.
+- Hide per-frame boot behavior in `vm.c` or `boot_run.c` when it should be visible as token composition.
+- Depend on repeated host-level restart of the boot program as the event loop.
+
 ## Review Checklist
 
 Before accepting a new instruction token, answer these questions.
@@ -118,6 +136,7 @@ Before accepting a new instruction token, answer these questions.
 - Is the name generic and application-neutral?
 - Does it avoid embedding UI, editor, boot, or menu policy?
 - Is the operation small enough to be reused in unrelated token blocks?
+- Does it avoid depending on host-level restart loops for program behavior?
 
 If any answer fails, do not add the instruction token. Build a token block instead.
 

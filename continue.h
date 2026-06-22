@@ -52,11 +52,50 @@ static void cbegin(u8 *chain, u32 len) {
     if (!s) return;
     s->chain = chain;
     s->chain_len = len;
+    s->chain_start = 0;
     s->off = 0;
     s->span = 0;
     s->payload = 0;
     s->payload_len = 0;
     ccont(0);
+}
+
+typedef struct {
+    u8 *payload;
+    u32 payload_len;
+    u8 *chain;
+    u32 chain_len;
+    u32 chain_start;
+    u32 off;
+    u32 span;
+    jmp_buf *ret_jb;
+    H cur_hash;
+} CvmCallFrame;
+
+static void cframe_save(CvmState *s, CvmCallFrame *f) {
+    if (!s || !f) return;
+    f->payload = s->payload;
+    f->payload_len = s->payload_len;
+    f->chain = s->chain;
+    f->chain_len = s->chain_len;
+    f->chain_start = s->chain_start;
+    f->off = s->off;
+    f->span = s->span;
+    f->ret_jb = s->ret_jb;
+    memcpy(f->cur_hash, s->cur_hash, 32);
+}
+
+static void cframe_restore(CvmState *s, CvmCallFrame *f) {
+    if (!s || !f) return;
+    s->payload = f->payload;
+    s->payload_len = f->payload_len;
+    s->chain = f->chain;
+    s->chain_len = f->chain_len;
+    s->chain_start = f->chain_start;
+    s->off = f->off;
+    s->span = f->span;
+    s->ret_jb = f->ret_jb;
+    memcpy(s->cur_hash, f->cur_hash, 32);
 }
 
 #endif
