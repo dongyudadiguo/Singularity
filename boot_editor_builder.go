@@ -84,6 +84,7 @@ func printBlocks(blocks []builtBlock, edges []graphEdge, chainHash [hashSize]byt
 
 func buildBootEditorBlocks(t tokenMap) []builtBlock {
 	b := newBlockBuilder(t)
+	rootHash := [hashSize]byte{}
 
 	b.block("fragment_round_rect_demo", func(c *chainBuilder) {
 		c.rect(86, 86, 260, 140)
@@ -95,41 +96,100 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(28)
 		c.add("surface_round_frame", nil)
 	})
+	b.block("fragment_text_badge_demo", func(c *chainBuilder) {
+		c.rect(88, 92, 300, 82)
+		c.pushColor(88, 80, 236)
+		c.pushU64(22)
+		c.add("surface_round_rect", nil)
+		c.text("starter badge", 116, 118, 245, 247, 250)
+		c.text("play me, then append me", 116, 146, 203, 213, 225)
+	})
+	b.block("fragment_color_shape_demo", func(c *chainBuilder) {
+		c.rect(86, 86, 112, 112)
+		c.pushColor(16, 185, 129)
+		c.add("surface_rect", nil)
+		c.rect(230, 86, 112, 112)
+		c.pushColor(245, 158, 11)
+		c.pushU64(26)
+		c.add("surface_round_rect", nil)
+		c.rect(374, 86, 112, 112)
+		c.pushColor(244, 63, 94)
+		c.add("surface_frame", nil)
+	})
 
 	catalogRoot := b.block("catalog_root", func(c *chainBuilder) {
 		c.text("CVM Token Catalog", 24, 24, 235, 238, 245)
-		c.text("00 rounded rectangle fragment | 01 surface | 02 records | 03 graph | 04 payload | 05 state", 24, 54, 148, 163, 184)
+		c.text("00 rounded rectangle | 01 text badge | 02 color shape | 03 surface | 04 records | 05 graph | 06 payload | 07 state", 24, 54, 148, 163, 184)
 	})
 	b.block("catalog_surface_tokens", func(c *chainBuilder) {
-		c.text("Surface tokens: open clear rect frame round_rect round_frame text poll pos", 24, 24, 148, 163, 184)
+		c.text("Surface tokens: open clear rect frame round_rect round_frame text poll pos size event_clear", 24, 24, 148, 163, 184)
 	})
 	b.block("catalog_record_tokens", func(c *chainBuilder) {
-		c.text("Record tokens: pack pack_hash pack_u64 at token_at payload_at insert replace delete", 24, 24, 148, 163, 184)
+		c.text("Record tokens: pack pack_empty pack_hash at token_at payload_at insert replace delete count valid", 24, 24, 148, 163, 184)
 	})
 	b.block("catalog_graph_tokens", func(c *chainBuilder) {
-		c.text("Graph tokens: graph_children graph_child_at open_child view_push view_pop publish_view", 24, 24, 148, 163, 184)
+		c.text("Graph tokens: graph_children graph_child_at open_child view_push view_pop publish_view link", 24, 24, 148, 163, 184)
 	})
 	b.block("catalog_payload_tokens", func(c *chainBuilder) {
-		c.text("Payload tokens: payload_u64_le payload_hash32 payload_bytes bytes_empty", 24, 24, 148, 163, 184)
+		c.text("Payload tokens: payload_u64_le payload_hash32 payload_bytes bytes_empty hash_hex u64_dec_bytes", 24, 24, 148, 163, 184)
 	})
 	b.block("catalog_state_tokens", func(c *chainBuilder) {
-		c.text("State tokens: state_hash_get/set state_index_get/set var_read var_write save_boot", 24, 24, 148, 163, 184)
+		c.text("State/control tokens: state_hash_get/set state_index_get/set var_read var_write save_boot call call_stack", 24, 24, 148, 163, 184)
 	})
+
+	saveEditedView := func(c *chainBuilder) {
+		c.add("dup", nil)
+		c.varWrite("boot.editor.view")
+		c.add("state_hash_set", nil)
+		c.add("publish_view", nil)
+		c.add("save_boot", nil)
+		c.pushU64(1)
+		c.varWrite("boot.editor.dirty")
+	}
+
+	setDirty := func(c *chainBuilder) {
+		c.pushU64(1)
+		c.varWrite("boot.editor.dirty")
+	}
 
 	initVars := b.block("init_boot_editor_vars", func(c *chainBuilder) {
 		c.add("state_hash_get", nil)
-		c.add("dup", nil)
 		c.varWrite("boot.editor.view")
+		c.pushHash(rootHash)
+		c.add("dup", nil)
+		c.varWrite("boot.browser.view")
+		c.varWrite("boot.browser.token")
+		c.pushU64(0)
+		c.varWrite("boot.editor.index")
+		setDirty(c)
+	})
+
+	wrapSelectedToken := b.block("wrap_selected_token", func(c *chainBuilder) {
+		c.add("records_empty", nil)
+		c.pushU64(0)
+		c.varRead("boot.browser.token")
+		c.add("record_pack_empty", nil)
+		c.add("records_insert", nil)
+	})
+
+	wrapSelectedTokenStore := b.block("wrap_selected_token_store", func(c *chainBuilder) {
+		c.add("call", wrapSelectedToken[:])
+		c.add("dup", nil)
+		c.varWrite("boot.browser.token")
+	})
+
+	browserRoot := b.block("browser_root", func(c *chainBuilder) {
+		c.pushHash(rootHash)
+		c.add("dup", nil)
+		c.varWrite("boot.browser.view")
+		c.varWrite("boot.browser.token")
+	})
+
+	browserCatalog := b.block("browser_catalog", func(c *chainBuilder) {
 		c.pushHash(catalogRoot)
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
-		c.pushHash(t.must("noop"))
-		c.varWrite("boot.browser.token")
-		c.pushU64(0)
-		c.varWrite("boot.editor.index")
-		c.pushU64(1)
-		c.varWrite("boot.editor.dirty")
 	})
 
 	insert := b.block("insert_selected_call", func(c *chainBuilder) {
@@ -139,11 +199,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varRead("boot.browser.token")
 		c.add("record_pack_hash", nil)
 		c.add("records_insert", nil)
-		c.add("dup", nil)
-		c.varWrite("boot.editor.view")
-		c.add("state_hash_set", nil)
-		c.add("publish_view", nil)
-		c.add("save_boot", nil)
+		saveEditedView(c)
 	})
 
 	insertToken := b.block("insert_selected_token", func(c *chainBuilder) {
@@ -153,11 +209,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("bytes_empty", nil)
 		c.add("record_pack", nil)
 		c.add("records_insert", nil)
-		c.add("dup", nil)
-		c.varWrite("boot.editor.view")
-		c.add("state_hash_set", nil)
-		c.add("publish_view", nil)
-		c.add("save_boot", nil)
+		saveEditedView(c)
 	})
 
 	replace := b.block("replace_with_selected_call", func(c *chainBuilder) {
@@ -167,11 +219,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varRead("boot.browser.token")
 		c.add("record_pack_hash", nil)
 		c.add("records_replace", nil)
-		c.add("dup", nil)
-		c.varWrite("boot.editor.view")
-		c.add("state_hash_set", nil)
-		c.add("publish_view", nil)
-		c.add("save_boot", nil)
+		saveEditedView(c)
 	})
 
 	replaceToken := b.block("replace_with_selected_token", func(c *chainBuilder) {
@@ -181,22 +229,96 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("bytes_empty", nil)
 		c.add("record_pack", nil)
 		c.add("records_replace", nil)
-		c.add("dup", nil)
-		c.varWrite("boot.editor.view")
-		c.add("state_hash_set", nil)
-		c.add("publish_view", nil)
-		c.add("save_boot", nil)
+		saveEditedView(c)
 	})
 
 	deleteRecord := b.block("delete_selected_record", func(c *chainBuilder) {
 		c.varRead("boot.editor.view")
 		c.varRead("boot.editor.index")
 		c.add("records_delete", nil)
+		saveEditedView(c)
+	})
+
+	appendSelectedCall := b.block("append_selected_call", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
 		c.add("dup", nil)
-		c.varWrite("boot.editor.view")
+		c.add("records_count", nil)
+		c.pushHash(t.must("call"))
+		c.varRead("boot.browser.token")
+		c.add("record_pack_hash", nil)
+		c.add("records_insert", nil)
+		saveEditedView(c)
+	})
+
+	appendSelectedToken := b.block("append_selected_token", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
+		c.add("dup", nil)
+		c.add("records_count", nil)
+		c.varRead("boot.browser.token")
+		c.add("record_pack_empty", nil)
+		c.add("records_insert", nil)
+		saveEditedView(c)
+	})
+
+	appendSelected := b.block("append_selected", func(c *chainBuilder) {
+		c.varRead("boot.browser.token")
+		c.add("records_valid", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.browser.is_block")
+		c.add("call_cond_static", appendSelectedCall[:])
+		c.varRead("boot.browser.is_block")
+		c.add("not", nil)
+		c.add("call_cond_static", appendSelectedToken[:])
+	})
+
+	playSelectedBlock := b.block("play_selected_block", func(c *chainBuilder) {
+		c.varRead("boot.browser.token")
+		c.add("call_stack", nil)
+		c.add("pop", nil)
+		setDirty(c)
+	})
+
+	playSelectedToken := b.block("play_selected_token", func(c *chainBuilder) {
+		c.add("call", wrapSelectedToken[:])
+		c.add("call_stack", nil)
+		c.add("pop", nil)
+		setDirty(c)
+	})
+
+	playSelected := b.block("play_selected", func(c *chainBuilder) {
+		c.varRead("boot.browser.token")
+		c.add("records_valid", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.browser.is_block")
+		c.add("call_cond_static", playSelectedBlock[:])
+		c.varRead("boot.browser.is_block")
+		c.add("not", nil)
+		c.add("call_cond_static", playSelectedToken[:])
+	})
+
+	publishSelectedBlock := b.block("publish_selected_block", func(c *chainBuilder) {
+		c.varRead("boot.browser.token")
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
-		c.add("save_boot", nil)
+		setDirty(c)
+	})
+
+	publishSelectedToken := b.block("publish_selected_token", func(c *chainBuilder) {
+		c.add("call", wrapSelectedTokenStore[:])
+		c.add("state_hash_set", nil)
+		c.add("publish_view", nil)
+		setDirty(c)
+	})
+
+	publishSelected := b.block("publish_selected", func(c *chainBuilder) {
+		c.varRead("boot.browser.token")
+		c.add("records_valid", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.browser.is_block")
+		c.add("call_cond_static", publishSelectedBlock[:])
+		c.varRead("boot.browser.is_block")
+		c.add("not", nil)
+		c.add("call_cond_static", publishSelectedToken[:])
 	})
 
 	publishEdit := b.block("publish_edited_view", func(c *chainBuilder) {
@@ -204,6 +326,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
 		c.add("save_boot", nil)
+		setDirty(c)
 	})
 
 	browserBack := b.block("browser_back", func(c *chainBuilder) {
@@ -250,20 +373,30 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.rectContains(660, uint64(220+i*34), 580, 30)
 			c.add("call_cond_static", target[:])
 		}
-		c.rectContains(20, 560, 180, 40)
+		c.rectContains(20, 540, 190, 40)
+		c.add("call_cond_static", appendSelected[:])
+		c.rectContains(225, 540, 170, 40)
 		c.add("call_cond_static", insert[:])
-		c.rectContains(220, 560, 170, 40)
+		c.rectContains(410, 540, 170, 40)
 		c.add("call_cond_static", insertToken[:])
-		c.rectContains(410, 560, 170, 40)
+		c.rectContains(20, 588, 170, 32)
 		c.add("call_cond_static", replace[:])
-		c.rectContains(20, 608, 170, 32)
+		c.rectContains(205, 588, 185, 32)
 		c.add("call_cond_static", replaceToken[:])
-		c.rectContains(210, 608, 150, 32)
+		c.rectContains(405, 588, 175, 32)
 		c.add("call_cond_static", deleteRecord[:])
-		c.rectContains(660, 560, 130, 40)
-		c.add("call_cond_static", browserBack[:])
-		c.rectContains(810, 560, 150, 40)
+		c.rectContains(20, 632, 180, 40)
 		c.add("call_cond_static", publishEdit[:])
+		c.rectContains(660, 540, 100, 40)
+		c.add("call_cond_static", browserRoot[:])
+		c.rectContains(780, 540, 130, 40)
+		c.add("call_cond_static", browserCatalog[:])
+		c.rectContains(930, 540, 100, 40)
+		c.add("call_cond_static", browserBack[:])
+		c.rectContains(660, 588, 170, 40)
+		c.add("call_cond_static", playSelected[:])
+		c.rectContains(850, 588, 190, 40)
+		c.add("call_cond_static", publishSelected[:])
 	})
 
 	draw := b.block("boot_editor_draw", func(c *chainBuilder) {
@@ -276,35 +409,50 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.rect(0, 0, 1280, 56)
 		c.pushColor(36, 41, 58)
 		c.add("surface_rect", nil)
-		c.text("CVM Boot Editor", 24, 18, 235, 238, 245)
-		c.text("browse the published token catalog on the right, edit/publish the boot block on the left", 24, 78, 148, 163, 184)
-		c.text("edit hash:", 24, 116, 137, 180, 250)
+		c.text("Browse -> Play -> Add -> Publish", 24, 18, 235, 238, 245)
+		c.text("right side starts at public root; Catalog opens generated tokens and starter fragments", 24, 78, 148, 163, 184)
+		c.text("edit hash:", 24, 110, 137, 180, 250)
 		c.varRead("boot.editor.view")
 		c.add("hash_hex", nil)
 		c.pushU64(118)
-		c.pushU64(116)
+		c.pushU64(110)
 		c.pushColor(218, 224, 235)
 		c.add("surface_text", nil)
-		c.text("edit index:", 24, 156, 137, 180, 250)
+		c.text("edit index:", 24, 148, 137, 180, 250)
 		c.varRead("boot.editor.index")
-		c.add("hash_hex", nil)
+		c.add("u64_dec_bytes", nil)
 		c.pushU64(128)
-		c.pushU64(156)
+		c.pushU64(148)
+		c.pushColor(218, 224, 235)
+		c.add("surface_text", nil)
+		c.text("edit count:", 210, 148, 137, 180, 250)
+		c.varRead("boot.editor.view")
+		c.add("records_count", nil)
+		c.add("u64_dec_bytes", nil)
+		c.pushU64(318)
+		c.pushU64(148)
 		c.pushColor(218, 224, 235)
 		c.add("surface_text", nil)
 		c.text("edit records 0..7", 24, 194, 170, 178, 196)
-		c.text("browser view:", 660, 116, 137, 180, 250)
+		c.text("public root:", 660, 100, 137, 180, 250)
+		c.pushHash(rootHash)
+		c.add("hash_hex", nil)
+		c.pushU64(780)
+		c.pushU64(100)
+		c.pushColor(218, 224, 235)
+		c.add("surface_text", nil)
+		c.text("browser view:", 660, 132, 137, 180, 250)
 		c.varRead("boot.browser.view")
 		c.add("hash_hex", nil)
 		c.pushU64(776)
-		c.pushU64(116)
+		c.pushU64(132)
 		c.pushColor(218, 224, 235)
 		c.add("surface_text", nil)
-		c.text("selected token:", 660, 156, 137, 180, 250)
+		c.text("selected hash:", 660, 164, 137, 180, 250)
 		c.varRead("boot.browser.token")
 		c.add("hash_hex", nil)
 		c.pushU64(794)
-		c.pushU64(156)
+		c.pushU64(164)
 		c.pushColor(218, 224, 235)
 		c.add("surface_text", nil)
 		c.text("network children 0..7", 660, 194, 170, 178, 196)
@@ -349,14 +497,19 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.add("surface_text", nil)
 		}
 
-		c.button("Insert call", 20, 560, 180, 40, 43, 116, 78)
-		c.button("Insert token", 220, 560, 170, 40, 56, 110, 129)
-		c.button("Replace call", 410, 560, 170, 40, 116, 94, 43)
-		c.button("Replace token", 20, 608, 170, 32, 92, 84, 132)
-		c.button("Delete", 210, 608, 150, 32, 129, 63, 63)
-		c.button("Back", 660, 560, 130, 40, 47, 94, 117)
-		c.button("Publish boot", 810, 560, 150, 40, 67, 120, 86)
-		c.text("Catalog: 00 rounded-rect fragment, 01 surface, 02 records, 03 graph, 04 payload, 05 state.", 980, 572, 148, 163, 184)
+		c.button("Append selected", 20, 540, 190, 40, 43, 116, 78)
+		c.button("Insert call", 225, 540, 170, 40, 43, 116, 78)
+		c.button("Insert token", 410, 540, 170, 40, 56, 110, 129)
+		c.button("Replace call", 20, 588, 170, 32, 116, 94, 43)
+		c.button("Replace token", 205, 588, 185, 32, 92, 84, 132)
+		c.button("Delete", 405, 588, 175, 32, 129, 63, 63)
+		c.button("Publish edit", 20, 632, 180, 40, 67, 120, 86)
+		c.button("Root", 660, 540, 100, 40, 47, 94, 117)
+		c.button("Catalog", 780, 540, 130, 40, 47, 94, 117)
+		c.button("Back", 930, 540, 100, 40, 47, 94, 117)
+		c.button("Play selected", 660, 588, 170, 40, 72, 92, 170)
+		c.button("Publish selected", 850, 588, 190, 40, 67, 120, 86)
+		c.text("Catalog rows: 00 rounded, 01 badge, 02 shapes, 03 surface, 04 records, 05 graph, 06 payload, 07 state.", 660, 650, 148, 163, 184)
 	})
 
 	drawDirty := b.block("boot_editor_draw_dirty", func(c *chainBuilder) {
@@ -396,7 +549,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("eq", nil)
 		c.add("call_cond_static", initVars[:])
 		c.pushU64(1280)
-		c.pushU64(640)
+		c.pushU64(720)
 		c.add("surface_open", nil)
 		c.add("pop", nil)
 		c.pushU64(1)
@@ -413,15 +566,19 @@ func buildBootEditorEdges(t tokenMap, blocks []builtBlock) []graphEdge {
 	for _, blk := range blocks {
 		byName[blk.name] = blk.hash
 	}
-	root := byName["catalog_root"]
+	publicRoot := [hashSize]byte{}
+	catalogRoot := byName["catalog_root"]
 
 	edges := []graphEdge{
-		{root, byName["fragment_round_rect_demo"]},
-		{root, byName["catalog_surface_tokens"]},
-		{root, byName["catalog_record_tokens"]},
-		{root, byName["catalog_graph_tokens"]},
-		{root, byName["catalog_payload_tokens"]},
-		{root, byName["catalog_state_tokens"]},
+		{publicRoot, catalogRoot},
+		{catalogRoot, byName["fragment_round_rect_demo"]},
+		{catalogRoot, byName["fragment_text_badge_demo"]},
+		{catalogRoot, byName["fragment_color_shape_demo"]},
+		{catalogRoot, byName["catalog_surface_tokens"]},
+		{catalogRoot, byName["catalog_record_tokens"]},
+		{catalogRoot, byName["catalog_graph_tokens"]},
+		{catalogRoot, byName["catalog_payload_tokens"]},
+		{catalogRoot, byName["catalog_state_tokens"]},
 	}
 
 	tokenEdge := func(cat string, names ...string) {
@@ -436,25 +593,29 @@ func buildBootEditorEdges(t tokenMap, blocks []builtBlock) []graphEdge {
 	tokenEdge("catalog_surface_tokens",
 		"surface_open", "surface_clear", "surface_rect", "surface_frame",
 		"surface_round_rect", "surface_round_frame", "surface_text", "surface_poll",
+		"surface_pos", "surface_size", "surface_event_clear", "sleep_ms",
 	)
 
 	tokenEdge("catalog_record_tokens",
-		"record_pack", "record_pack_hash", "record_pack_u64",
-		"records_insert", "records_replace", "records_delete",
+		"record_pack", "record_pack_empty", "record_pack_hash", "record_pack_u64",
+		"records_empty", "records_insert", "records_replace", "records_delete",
+		"records_count", "records_valid", "records_at", "record_token_at", "record_payload_at",
 	)
 
 	tokenEdge("catalog_graph_tokens",
 		"graph_children", "graph_child_at", "open_child",
-		"view_push", "view_pop", "publish_view",
+		"view_push", "view_pop", "publish_view", "graph_link", "graph_link_root",
 	)
 
 	tokenEdge("catalog_payload_tokens",
 		"payload_u64_le", "payload_hash32", "payload_bytes", "bytes_empty",
+		"hash_hex", "u64_dec_bytes",
 	)
 
 	tokenEdge("catalog_state_tokens",
 		"state_hash_get", "state_hash_set", "state_index_get", "state_index_set",
-		"var_read", "var_write", "save_boot",
+		"var_read", "var_write", "save_boot", "zero", "dup", "pop", "not",
+		"eq", "ne", "call", "call_cond_static", "call_stack", "again_cond",
 	)
 
 	return edges
