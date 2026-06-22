@@ -64,6 +64,8 @@ Prefer filling lower-level gaps first:
 
 - Add `payload_hash32` before adding a token that inserts a specific call.
 - Add `rect_contains` before adding button-click commands.
+- Add `surface_round_rect` before requiring applications to fake rounded corners with layout-specific block piles.
+- Add `graph_child_at` before requiring every browser row to fetch and decode a full child list.
 - Add `over`, `rot`, `nip`, and `tuck` before adding large control macros.
 - Add `records_insert`, `records_replace`, and `records_delete` before adding editor commands.
 
@@ -76,6 +78,7 @@ Allowed examples:
 - `surface_open`
 - `surface_poll`
 - `surface_text`
+- `surface_round_rect`
 - `sleep_ms`
 - `load_boot`
 - `save_boot`
@@ -129,7 +132,8 @@ Its core dependencies are generic tokens only:
 - Numeric and boolean: `lt`, `gt`, `le`, `ge`, `eq`, `ne`, `and`, `or`, `not`
 - Records: `record_pack`, `record_pack_hash`, `records_insert`, `records_replace`, `records_delete`
 - Rectangles and color: `rect_make`, `rect_contains`, `color_rgb`
-- Surface: `surface_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_text`, `surface_poll`, `surface_pos`, `surface_event_clear`
+- Surface: `surface_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_poll`, `surface_pos`, `surface_event_clear`
+- Network graph: `graph_children`, `graph_child_at`, `open_child`, `child_at`
 - Loop pacing: `sleep_ms`
 - State and persistence: `state_hash_get`, `state_hash_set`, `state_index_get`, `state_index_set`, `load_boot`, `save_boot`, `publish_view`
 

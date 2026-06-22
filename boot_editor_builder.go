@@ -28,6 +28,11 @@ type builtBlock struct {
 	hash [hashSize]byte
 }
 
+type graphEdge struct {
+	parent [hashSize]byte
+	child  [hashSize]byte
+}
+
 func main() {
 	addr := flag.String("addr", "118.25.42.70:9000", "CVM server address")
 	mapPath := flag.String("map", "mods_map.txt", "token map path")
@@ -39,8 +44,9 @@ func main() {
 	must(err)
 
 	blocks := buildBootEditorBlocks(toks)
+	edges := buildBootEditorEdges(toks, blocks)
 	chainHash := blocks[len(blocks)-1].hash
-	printBlocks(blocks, chainHash, toks.must("boot_run"))
+	printBlocks(blocks, edges, chainHash, toks.must("boot_run"))
 	if *dryRun {
 		return
 	}
@@ -55,6 +61,9 @@ func main() {
 	for _, b := range blocks {
 		must(upload(conn, b.body))
 	}
+	for _, e := range edges {
+		must(edge(conn, e.parent, e.child))
+	}
 	must(uset(conn, user, bootKey, chainHash))
 	root := [hashSize]byte{}
 	bootRun := toks.must("boot_run")
@@ -62,9 +71,12 @@ func main() {
 	must(vote(conn, user, root, bootRun))
 }
 
-func printBlocks(blocks []builtBlock, chainHash [hashSize]byte, bootRun [hashSize]byte) {
+func printBlocks(blocks []builtBlock, edges []graphEdge, chainHash [hashSize]byte, bootRun [hashSize]byte) {
 	for _, b := range blocks {
 		fmt.Printf("block\t%s\t%x\n", b.name, b.hash)
+	}
+	for _, e := range edges {
+		fmt.Printf("edge\t%x\t%x\n", e.parent, e.child)
 	}
 	fmt.Printf("boot_editor_hash\t%x\n", chainHash)
 	fmt.Printf("root_token\tboot_run\t%x\n", bootRun)
@@ -73,10 +85,42 @@ func printBlocks(blocks []builtBlock, chainHash [hashSize]byte, bootRun [hashSiz
 func buildBootEditorBlocks(t tokenMap) []builtBlock {
 	b := newBlockBuilder(t)
 
+	b.block("fragment_round_rect_demo", func(c *chainBuilder) {
+		c.rect(86, 86, 260, 140)
+		c.pushColor(69, 130, 246)
+		c.pushU64(28)
+		c.add("surface_round_rect", nil)
+		c.rect(86, 86, 260, 140)
+		c.pushColor(224, 232, 255)
+		c.pushU64(28)
+		c.add("surface_round_frame", nil)
+	})
+
+	catalogRoot := b.block("catalog_root", func(c *chainBuilder) {
+		c.text("CVM Token Catalog", 24, 24, 235, 238, 245)
+		c.text("00 rounded rectangle fragment | 01 surface | 02 records | 03 graph | 04 payload | 05 state", 24, 54, 148, 163, 184)
+	})
+	b.block("catalog_surface_tokens", func(c *chainBuilder) {
+		c.text("Surface tokens: open clear rect frame round_rect round_frame text poll pos", 24, 24, 148, 163, 184)
+	})
+	b.block("catalog_record_tokens", func(c *chainBuilder) {
+		c.text("Record tokens: pack pack_hash pack_u64 at token_at payload_at insert replace delete", 24, 24, 148, 163, 184)
+	})
+	b.block("catalog_graph_tokens", func(c *chainBuilder) {
+		c.text("Graph tokens: graph_children graph_child_at open_child view_push view_pop publish_view", 24, 24, 148, 163, 184)
+	})
+	b.block("catalog_payload_tokens", func(c *chainBuilder) {
+		c.text("Payload tokens: payload_u64_le payload_hash32 payload_bytes bytes_empty", 24, 24, 148, 163, 184)
+	})
+	b.block("catalog_state_tokens", func(c *chainBuilder) {
+		c.text("State tokens: state_hash_get/set state_index_get/set var_read var_write save_boot", 24, 24, 148, 163, 184)
+	})
+
 	initVars := b.block("init_boot_editor_vars", func(c *chainBuilder) {
 		c.add("state_hash_get", nil)
 		c.add("dup", nil)
 		c.varWrite("boot.editor.view")
+		c.pushHash(catalogRoot)
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
@@ -100,12 +144,40 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("save_boot", nil)
 	})
 
+	insertToken := b.block("insert_selected_token", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
+		c.varRead("boot.editor.index")
+		c.varRead("boot.browser.token")
+		c.add("bytes_empty", nil)
+		c.add("record_pack", nil)
+		c.add("records_insert", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.editor.view")
+		c.add("state_hash_set", nil)
+		c.add("publish_view", nil)
+		c.add("save_boot", nil)
+	})
+
 	replace := b.block("replace_with_selected_call", func(c *chainBuilder) {
 		c.varRead("boot.editor.view")
 		c.varRead("boot.editor.index")
 		c.pushHash(t.must("call"))
 		c.varRead("boot.browser.token")
 		c.add("record_pack_hash", nil)
+		c.add("records_replace", nil)
+		c.add("dup", nil)
+		c.varWrite("boot.editor.view")
+		c.add("state_hash_set", nil)
+		c.add("publish_view", nil)
+		c.add("save_boot", nil)
+	})
+
+	replaceToken := b.block("replace_with_selected_token", func(c *chainBuilder) {
+		c.varRead("boot.editor.view")
+		c.varRead("boot.editor.index")
+		c.varRead("boot.browser.token")
+		c.add("bytes_empty", nil)
+		c.add("record_pack", nil)
 		c.add("records_replace", nil)
 		c.add("dup", nil)
 		c.varWrite("boot.editor.view")
@@ -178,9 +250,13 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		}
 		c.rectContains(20, 560, 180, 40)
 		c.add("call_cond_static", insert[:])
-		c.rectContains(220, 560, 190, 40)
+		c.rectContains(220, 560, 170, 40)
+		c.add("call_cond_static", insertToken[:])
+		c.rectContains(410, 560, 170, 40)
 		c.add("call_cond_static", replace[:])
-		c.rectContains(430, 560, 170, 40)
+		c.rectContains(20, 608, 170, 32)
+		c.add("call_cond_static", replaceToken[:])
+		c.rectContains(210, 608, 150, 32)
 		c.add("call_cond_static", deleteRecord[:])
 		c.rectContains(660, 560, 130, 40)
 		c.add("call_cond_static", browserBack[:])
@@ -209,7 +285,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushColor(36, 41, 58)
 		c.add("surface_rect", nil)
 		c.text("CVM Boot Editor", 24, 18, 235, 238, 245)
-		c.text("browse token graph on the right, edit/publish the boot block on the left", 24, 78, 148, 163, 184)
+		c.text("browse the published token catalog on the right, edit/publish the boot block on the left", 24, 78, 148, 163, 184)
 		c.text("edit hash:", 24, 116, 137, 180, 250)
 		c.varRead("boot.editor.view")
 		c.add("hash_hex", nil)
@@ -272,9 +348,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.add("surface_frame", nil)
 			c.text(fmt.Sprintf("%02d", i), 672, y+8, 116, 211, 194)
 			c.varRead("boot.browser.view")
-			c.add("graph_children", nil)
 			c.pushU64(uint64(i))
-			c.add("child_at", nil)
+			c.add("graph_child_at", nil)
 			c.add("hash_hex", nil)
 			c.pushU64(710)
 			c.pushU64(y + 8)
@@ -282,12 +357,14 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.add("surface_text", nil)
 		}
 
-		c.button("Insert selected", 20, 560, 180, 40, 43, 116, 78)
-		c.button("Replace selected", 220, 560, 190, 40, 116, 94, 43)
-		c.button("Delete selected", 430, 560, 170, 40, 129, 63, 63)
+		c.button("Insert call", 20, 560, 180, 40, 43, 116, 78)
+		c.button("Insert token", 220, 560, 170, 40, 56, 110, 129)
+		c.button("Replace call", 410, 560, 170, 40, 116, 94, 43)
+		c.button("Replace token", 20, 608, 170, 32, 92, 84, 132)
+		c.button("Delete", 210, 608, 150, 32, 129, 63, 63)
 		c.button("Back", 660, 560, 130, 40, 47, 94, 117)
 		c.button("Publish boot", 810, 560, 150, 40, 67, 120, 86)
-		c.text("Click browser rows to enter children; insert/replace uses selected token.", 980, 572, 148, 163, 184)
+		c.text("Catalog: 00 rounded-rect fragment, 01 surface, 02 records, 03 graph, 04 payload, 05 state.", 980, 572, 148, 163, 184)
 
 		c.add("surface_poll", nil)
 		c.pushU64(513)
@@ -299,6 +376,58 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 	})
 
 	return b.finish()
+}
+
+func buildBootEditorEdges(t tokenMap, blocks []builtBlock) []graphEdge {
+	byName := map[string][hashSize]byte{}
+	for _, blk := range blocks {
+		byName[blk.name] = blk.hash
+	}
+	root := byName["catalog_root"]
+
+	edges := []graphEdge{
+		{root, byName["fragment_round_rect_demo"]},
+		{root, byName["catalog_surface_tokens"]},
+		{root, byName["catalog_record_tokens"]},
+		{root, byName["catalog_graph_tokens"]},
+		{root, byName["catalog_payload_tokens"]},
+		{root, byName["catalog_state_tokens"]},
+	}
+
+	tokenEdge := func(cat string, names ...string) {
+		catHash := byName[cat]
+		for _, n := range names {
+			if tok, ok := t[n]; ok {
+				edges = append(edges, graphEdge{catHash, tok})
+			}
+		}
+	}
+
+	tokenEdge("catalog_surface_tokens",
+		"surface_open", "surface_clear", "surface_rect", "surface_frame",
+		"surface_round_rect", "surface_round_frame", "surface_text", "surface_poll",
+	)
+
+	tokenEdge("catalog_record_tokens",
+		"record_pack", "record_pack_hash", "record_pack_u64",
+		"records_insert", "records_replace", "records_delete",
+	)
+
+	tokenEdge("catalog_graph_tokens",
+		"graph_children", "graph_child_at", "open_child",
+		"view_push", "view_pop", "publish_view",
+	)
+
+	tokenEdge("catalog_payload_tokens",
+		"payload_u64_le", "payload_hash32", "payload_bytes", "bytes_empty",
+	)
+
+	tokenEdge("catalog_state_tokens",
+		"state_hash_get", "state_hash_set", "state_index_get", "state_index_set",
+		"var_read", "var_write", "save_boot",
+	)
+
+	return edges
 }
 
 type blockBuilder struct {
@@ -364,10 +493,12 @@ func (c *chainBuilder) text(s string, x, y uint64, r, g, b uint64) {
 func (c *chainBuilder) button(label string, x, y, w, h uint64, r, g, b uint64) {
 	c.rect(x, y, w, h)
 	c.pushColor(r, g, b)
-	c.add("surface_rect", nil)
+	c.pushU64(14)
+	c.add("surface_round_rect", nil)
 	c.rect(x, y, w, h)
 	c.pushColor(180, 190, 210)
-	c.add("surface_frame", nil)
+	c.pushU64(14)
+	c.add("surface_round_frame", nil)
 	c.text(label, x+14, y+13, 245, 247, 250)
 }
 
