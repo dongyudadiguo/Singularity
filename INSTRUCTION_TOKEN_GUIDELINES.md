@@ -33,6 +33,9 @@ Good examples:
 - `rect_contains`: test whether a point is inside a rect.
 - `records_insert`: insert one record into a record chain.
 - `surface_text`: draw bytes at a position.
+- `surface_text_utf8`: draw a bytes block as UTF-8 text through the platform text API.
+- `surface_clip_push`: push an intersected drawing clip for later surface operations.
+- `time_ms`: expose a monotonic platform clock as a u64.
 
 Bad examples:
 
@@ -78,8 +81,14 @@ Allowed examples:
 - `surface_open`
 - `surface_poll`
 - `surface_text`
+- `surface_text_utf8`
+- `surface_clip_push`
+- `surface_translate_push`
+- `surface_char`
 - `surface_round_rect`
 - `sleep_ms`
+- `time_ms`
+- `random_u64`
 - `load_boot`
 - `save_boot`
 
@@ -122,7 +131,7 @@ Acceptable fixes:
 Unacceptable fixes:
 
 - Add `boot_editor_loop`, `draw_boot_editor`, or other L4 application instructions.
-- Hide per-frame boot behavior in `vm.c` or `boot_run.c` when it should be visible as token composition.
+- Hide per-frame boot or toy behavior in `vm.c` or `boot_run.c` when it should be visible as token composition.
 - Depend on repeated host-level restart of the boot program as the event loop.
 
 ## Review Checklist
@@ -140,20 +149,23 @@ Before accepting a new instruction token, answer these questions.
 
 If any answer fails, do not add the instruction token. Build a token block instead.
 
-## Current Boot Editor Boundary
+## Current First Boot Boundary
 
-The first boot graphical self-editor must be built as token blocks from existing primitives.
+The first boot Toy Home and graphical self-editor must be built as token blocks from existing primitives.
 
 Its core dependencies are generic tokens only:
 
 - Payload immediates: `payload_byte`, `payload_u64_le`, `payload_hash32`
 - Stack: `dup`, `swap`, `over`, `rot`, `nip`, `tuck`
-- Numeric and boolean: `lt`, `gt`, `le`, `ge`, `eq`, `ne`, `and`, `or`, `not`
-- Records: `record_pack`, `record_pack_hash`, `records_insert`, `records_replace`, `records_delete`
+- Numeric and boolean: `lt`, `gt`, `le`, `ge`, `eq`, `ne`, `and`, `or`, `not`, `u64_mod`, `time_ms`, `random_u64`
+- Bytes and UTF-8: `bytes_take`, `bytes_drop`, `bytes_replace`, `hash_to_bytes`, `bytes_to_hash32`, `utf8_from_codepoint`, `utf8_drop_last`
+- Records: `record_pack`, `record_pack_hash`, `records_insert`, `records_replace`, `records_delete`, `records_count`, `records_at`, `record_payload_at`
 - Rectangles and color: `rect_make`, `rect_contains`, `color_rgb`
-- Surface: `surface_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_poll`, `surface_pos`, `surface_event_clear`
+- Surface: `surface_open`, `surface_is_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_text_utf8`, `surface_clip_push`, `surface_clip_pop`, `surface_translate_push`, `surface_translate_pop`, `surface_poll`, `surface_char`, `surface_pos`, `surface_event_clear`
 - Network graph: `graph_children`, `graph_child_at`, `open_child`, `child_at`
 - Loop pacing: `sleep_ms`
 - State and persistence: `state_hash_get`, `state_hash_set`, `state_index_get`, `state_index_set`, `load_boot`, `save_boot`, `publish_view`
 
-Do not add editor-specific instruction tokens unless this boundary is proven insufficient by an actual failed composition attempt.
+The surface context tokens are generic drawing and input primitives, not Toy Home primitives. They exist because clipped/translated inline rendering, UTF-8 output, Unicode input, clocks, randomness, and modulo arithmetic are reusable lower-level capabilities.
+
+Do not add toy-specific or editor-specific instruction tokens unless this boundary is proven insufficient by an actual failed composition attempt.

@@ -1,18 +1,18 @@
 # Boot Editor Composition
 
-This project now has enough generic instruction tokens to compose the first boot graphical self-editor as token blocks, without adding editor-shaped instruction tokens.
+This project now has enough generic instruction tokens to compose the first boot Toy Home and the preserved graphical self-editor as token blocks, without adding toy-shaped or editor-shaped instruction tokens.
 
 ## Token Layers
 
 - L0 data tokens: `zero`, `one`, `two`, `four`, `eight`, `thirty_two`, `thirty_six`, `push`, `pop`, `dup`, `swap`, `over`, `rot`, `nip`, `tuck`.
-- L0 numeric tokens: `add`, `sub`, `mul`, `div`, `lt`, `gt`, `le`, `ge`, `eq`, `ne`, `not`, `and`, `or`, `u64_inc`, `u64_dec`, `u64_min`, `u64_max`, `u64_bit_and`, `u64_bit_or`, `u64_bit_shl`, `u64_bit_shr`.
-- L0 byte/hash tokens: `bytes_empty`, `bytes_insert`, `bytes_delete`, `bytes_replace`, `bytes_take`, `bytes_drop`, `byte_at`, `byte_put`, `hash_from_bytes`, `hash_to_bytes`, `bytes_to_hash32`.
+- L0 numeric tokens: `add`, `sub`, `mul`, `div`, `lt`, `gt`, `le`, `ge`, `eq`, `ne`, `not`, `and`, `or`, `u64_inc`, `u64_dec`, `u64_min`, `u64_max`, `u64_mod`, `u64_bit_and`, `u64_bit_or`, `u64_bit_shl`, `u64_bit_shr`.
+- L0 byte/hash tokens: `bytes_empty`, `bytes_insert`, `bytes_delete`, `bytes_replace`, `bytes_take`, `bytes_drop`, `byte_at`, `byte_put`, `hash_from_bytes`, `hash_to_bytes`, `bytes_to_hash32`, `utf8_from_codepoint`, `utf8_drop_last`.
 - L0 immediate tokens: `payload_byte`, `payload_u64_le`, `payload_hash32`, `payload_bytes`, `hash_payload`.
 - L1 structure tokens: `range_make`, `range_start`, `range_len`, `pair_make`, `pair_first`, `pair_second`, `rect_make`, `rect_contains`, `color_rgb`.
 - L1 record tokens: `record_pack`, `record_pack_hash`, `record_pack_u64`, `record_at`, `record_token_at`, `record_payload_at`, `records_insert`, `records_replace`, `records_delete`, `records_append`, `records_count`.
 - L2 state tokens: `state_hash_get`, `state_hash_set`, `state_index_get`, `state_index_set`, `state_index_inc`, `state_index_dec`, `state_record`, `state_record_replace`, `view_push`, `view_pop`.
 - L2 scoped variable tokens: `var_read`, `var_write`, `var_set`, `scope_start`, `scope_end`.
-- L3 platform edge tokens: `surface_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_poll`, `surface_pos`, `surface_size`, `surface_event_clear`, `sleep_ms`, `load_boot`, `save_boot`, `publish_view`.
+- L3 platform edge tokens: `surface_open`, `surface_is_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_text_utf8`, `surface_clip_push`, `surface_clip_pop`, `surface_translate_push`, `surface_translate_pop`, `surface_poll`, `surface_char`, `surface_pos`, `surface_size`, `surface_event_clear`, `sleep_ms`, `time_ms`, `random_u64`, `load_boot`, `save_boot`, `publish_view`.
 - L3 network graph tokens: `graph_children`, `graph_child_at`, `open_child`, `child_at`.
 
 ## Boot Editor Blocks
@@ -36,8 +36,23 @@ This project now has enough generic instruction tokens to compose the first boot
 - Publish selected: valid blocks are installed as the state hash and published with `publish_view`. Raw tokens are wrapped into a single-record block, stored back to `boot.browser.token`, installed as state hash, and published without calling `save_boot`.
 - Publish edit: the edited boot block is installed with `state_hash_set`, published with `publish_view`, and persisted with `save_boot`.
 
+## Toy Home Blocks
+
+- Default mode: the boot entry initializes `toy.mode = home`, opens the same surface loop, and draws Toy Home first instead of the record editor.
+- Inspector mode: the previous editor draw and mouse dispatch are still present behind `toy.mode = inspector`, with a `返回玩具` action back to Toy Home.
+- Stage data: `toy.stage.data` is a record chain of `noop` records. Each payload is a 128-byte object descriptor with type, local x/y/w/h, color, radius or variant, flags or seed, primary hash, and auxiliary hash fields.
+- Stage rendering: Toy Home draws a clipped stage, translates into stage-local coordinates, stores `toy.render.data`, loops over `records_count`, parses each object payload with byte/u64 primitives, and dispatches object renderers by type.
+- Object types: solid rectangles, rounded rectangles, frames, UTF-8 text stickers, badges, clipped/translated external block wrappers, and animated pulse objects are generated as normal token blocks.
+- Stage editing: add, select, drag, recolor, resize, duplicate, undo, clear, and text-edit actions are composed from `records_at`, `record_payload_at`, `u64_le_read`, `u64_le_put`, `bytes_replace`, `record_pack`, and `records_replace`.
+- Chinese text: labels and editable sticker/title text use `surface_text_utf8`, `surface_char`, `utf8_from_codepoint`, and `utf8_drop_last` so UTF-8 text is preserved instead of using ANSI drawing.
+- Explore panel: Toy Home keeps `toy.browser.view` and `toy.browser.selected` separate from Inspector browser state, and links a generated `toy_gallery_root` under the public root without voting it above `boot_run`.
+- External wrappers: selected external blocks can be added as stage objects. They are executed inline through `call_stack` inside `surface_clip_push` and `surface_translate_push` contexts, so drawing tokens are constrained to the object surface when they respect the generic surface context.
+- Publishing: `发布` builds a `CVM_TOY_STAGE_V1` runner block, uploads it, publishes it, links/votes it under `toy_gallery_root`, and appends it to the user shelf key without calling `save_boot`.
+- Boot actions: `设为启动` builds a runner and calls `save_boot`; `发布并设为启动` publishes first, then persists the generated runner as the user's boot.
+- Runtime renderer: published toy packages call `toy_runtime_render_stage`. If a surface already exists, it draws once for inline previews. If no surface exists, it opens a standalone frame loop and redraws until close.
+
 ## Confirmation
 
-No boot-editor-specific instruction token is required. Public-root browsing, catalog jumps, starter fragments, play, append, raw-token wrapping, and publish actions are all block-level composition over generic tokens: numbers, stack shuffling, bytes, records, rectangles, surface events, state, variables, call control, and graph publishing.
+No toy-specific or boot-editor-specific instruction token is required. Toy Home, public-root browsing, catalog jumps, starter fragments, play, append, raw-token wrapping, stage editing, text editing, external object clipping, and publish actions are all block-level composition over generic tokens: numbers, stack shuffling, UTF-8 bytes, records, rectangles, surface events, surface context, state, variables, call control, and graph publishing.
 
 The boot editor must remain a token-block program. If a future first-start flow cannot be composed comfortably from the current token set, fill the smallest reusable L0-L3 gap first rather than adding an application-shaped instruction or relying on the host to repeatedly restart the boot block.
