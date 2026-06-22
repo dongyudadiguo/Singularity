@@ -274,8 +274,15 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
+<<<<<<< HEAD
 		c.add("call", refreshBootBrowser[:])
 		setDirty(c)
+=======
+		c.pushHash(t.must("noop"))
+		c.varWrite("boot.browser.token")
+		c.pushU64(0)
+		c.varWrite("boot.editor.index")
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 	})
 
 	insert := b.block("insert_selected_call", func(c *chainBuilder) {
@@ -1640,6 +1647,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call_cond_static", toyDrawHome[:])
 	})
 
+<<<<<<< HEAD
 	drawDirty := b.block("boot_editor_draw_dirty", func(c *chainBuilder) {
 		c.add("call", draw[:])
 		c.pushU64(0)
@@ -1656,15 +1664,17 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call_cond_static", toyDrawStage[:])
 	})
 
+=======
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 	frameLoop := b.block("boot_editor_frame_loop", func(c *chainBuilder) {
-		c.varRead("boot.editor.dirty")
-		c.add("call_cond_static", drawDirty[:])
+		c.add("call", draw[:])
 		c.add("surface_poll", nil)
 		c.varWrite("toy.event")
 		c.varRead("toy.event")
 		c.pushU64(513)
 		c.add("eq", nil)
 		c.add("call_cond_static", mouse[:])
+<<<<<<< HEAD
 		c.varRead("toy.event")
 		c.pushU64(512)
 		c.add("eq", nil)
@@ -1687,6 +1697,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call_cond_static", markDirty[:])
 		c.add("call", drawIdleStage[:])
 		c.varRead("toy.event")
+=======
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 		c.pushU64(0xffffffff)
 		c.add("ne", nil)
 		c.add("surface_event_clear", nil)
@@ -1701,9 +1713,12 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(720)
 		c.add("surface_open", nil)
 		c.add("pop", nil)
+<<<<<<< HEAD
 		c.add("surface_event_clear", nil)
 		c.pushU64(1)
 		c.varWrite("boot.editor.dirty")
+=======
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 		c.add("call", frameLoop[:])
 		c.add("surface_close", nil)
 	})
