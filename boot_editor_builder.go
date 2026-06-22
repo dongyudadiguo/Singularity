@@ -282,6 +282,9 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varWrite("boot.browser.token")
 		c.pushU64(0)
 		c.varWrite("boot.editor.index")
+<<<<<<< HEAD
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
+=======
 >>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 	})
 
@@ -1532,6 +1535,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.text("Catalog rows: 00 rounded, 01 badge, 02 shapes, 03 surface, 04 records, 05 graph, 06 payload, 07 state.", 660, 650, 148, 163, 184)
 	})
 
+<<<<<<< HEAD
 	toyDrawTextEditOverlay := b.block("toy_draw_text_edit_overlay", func(c *chainBuilder) {
 		c.rect(320, 34, 650, 62)
 		c.pushColor(76, 29, 149)
@@ -1666,6 +1670,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 
 =======
 >>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
+=======
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 	frameLoop := b.block("boot_editor_frame_loop", func(c *chainBuilder) {
 		c.add("call", draw[:])
 		c.add("surface_poll", nil)
@@ -1674,6 +1680,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(513)
 		c.add("eq", nil)
 		c.add("call_cond_static", mouse[:])
+<<<<<<< HEAD
 <<<<<<< HEAD
 		c.varRead("toy.event")
 		c.pushU64(512)
@@ -1699,6 +1706,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varRead("toy.event")
 =======
 >>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
+=======
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 		c.pushU64(0xffffffff)
 		c.add("ne", nil)
 		c.add("surface_event_clear", nil)
@@ -1714,9 +1723,12 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("surface_open", nil)
 		c.add("pop", nil)
 <<<<<<< HEAD
+<<<<<<< HEAD
 		c.add("surface_event_clear", nil)
 		c.pushU64(1)
 		c.varWrite("boot.editor.dirty")
+=======
+>>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 =======
 >>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 		c.add("call", frameLoop[:])
