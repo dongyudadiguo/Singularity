@@ -128,6 +128,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varWrite("boot.browser.token")
 		c.pushU64(0)
 		c.varWrite("boot.editor.index")
+		c.pushU64(1)
+		c.varWrite("boot.editor.dirty")
 	})
 
 	insert := b.block("insert_selected_call", func(c *chainBuilder) {
@@ -357,13 +359,29 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.text("Catalog: 00 rounded-rect fragment, 01 surface, 02 records, 03 graph, 04 payload, 05 state.", 980, 572, 148, 163, 184)
 	})
 
-	frameLoop := b.block("boot_editor_frame_loop", func(c *chainBuilder) {
+	drawDirty := b.block("boot_editor_draw_dirty", func(c *chainBuilder) {
 		c.add("call", draw[:])
+		c.pushU64(0)
+		c.varWrite("boot.editor.dirty")
+	})
+
+	markDirty := b.block("boot_editor_mark_dirty", func(c *chainBuilder) {
+		c.pushU64(1)
+		c.varWrite("boot.editor.dirty")
+	})
+
+	frameLoop := b.block("boot_editor_frame_loop", func(c *chainBuilder) {
+		c.varRead("boot.editor.dirty")
+		c.add("call_cond_static", drawDirty[:])
 		c.add("surface_poll", nil)
 		c.add("dup", nil)
 		c.pushU64(513)
 		c.add("eq", nil)
 		c.add("call_cond_static", mouse[:])
+		c.add("dup", nil)
+		c.pushU64(513)
+		c.add("eq", nil)
+		c.add("call_cond_static", markDirty[:])
 		c.pushU64(0xffffffff)
 		c.add("ne", nil)
 		c.add("surface_event_clear", nil)
@@ -381,6 +399,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(640)
 		c.add("surface_open", nil)
 		c.add("pop", nil)
+		c.pushU64(1)
+		c.varWrite("boot.editor.dirty")
 		c.add("call", frameLoop[:])
 		c.add("surface_close", nil)
 	})
