@@ -8,6 +8,7 @@
 #include "cvm_state.h"
 
 static const H CEND = {0};
+static const u32 CNOFF = 0xffffffffu;
 
 static u32 cspan_at(u8 *p) {
     return (u32)p[32] | ((u32)p[33] << 8) | ((u32)p[34] << 16) | ((u32)p[35] << 24);
@@ -21,16 +22,16 @@ static void* cfind(u8 *tok) {
     return m ? (void*)GetProcAddress(m, "run") : 0;
 }
 
-static void ccont(u32 off) {
+static int cexec(u32 off) {
     CvmState *s = cvm_state();
-    if (!s || !s->chain || off + 32 > s->chain_len) return;
+    if (!s || !s->chain || off + 32 > s->chain_len) return 0;
 
     u8 *p = s->chain + off;
-    if (memcmp(p, CEND, 32) == 0) return;
-    if (off + 36 > s->chain_len) return;
+    if (memcmp(p, CEND, 32) == 0) return 0;
+    if (off + 36 > s->chain_len) return 0;
 
     u32 sp = cspan_at(p);
-    if (sp < 4 || off + 32 + sp > s->chain_len) return;
+    if (sp < 4 || off + 32 + sp > s->chain_len) return 0;
 
     s->off = off;
     s->span = sp;
@@ -39,6 +40,13 @@ static void ccont(u32 off) {
 
     void *fn = cfind(p);
     if (fn) ((void(*)())fn)();
+    return fn != 0;
+}
+
+static void ccont(u32 off) {
+    CvmState *s = cvm_state();
+    if (!s) return;
+    s->next_off = off;
 }
 
 static void cnext(void) {
@@ -50,6 +58,7 @@ static void cnext(void) {
 static void cbegin(u8 *chain, u32 len) {
     CvmState *s = cvm_state();
     if (!s) return;
+    u32 old_next_off = s->next_off;
     s->chain = chain;
     s->chain_len = len;
     s->chain_start = 0;
@@ -57,7 +66,14 @@ static void cbegin(u8 *chain, u32 len) {
     s->span = 0;
     s->payload = 0;
     s->payload_len = 0;
-    ccont(0);
+    s->next_off = 0;
+    for (;;) {
+        u32 off = s->next_off;
+        s->next_off = CNOFF;
+        if (off == CNOFF) break;
+        if (!cexec(off)) break;
+    }
+    s->next_off = old_next_off;
 }
 
 typedef struct {
@@ -69,6 +85,7 @@ typedef struct {
     u32 off;
     u32 span;
     jmp_buf *ret_jb;
+    u32 next_off;
     H cur_hash;
 } CvmCallFrame;
 
@@ -82,6 +99,7 @@ static void cframe_save(CvmState *s, CvmCallFrame *f) {
     f->off = s->off;
     f->span = s->span;
     f->ret_jb = s->ret_jb;
+    f->next_off = s->next_off;
     memcpy(f->cur_hash, s->cur_hash, 32);
 }
 
@@ -95,6 +113,7 @@ static void cframe_restore(CvmState *s, CvmCallFrame *f) {
     s->off = f->off;
     s->span = f->span;
     s->ret_jb = f->ret_jb;
+    s->next_off = f->next_off;
     memcpy(s->cur_hash, f->cur_hash, 32);
 }
 

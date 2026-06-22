@@ -86,8 +86,18 @@ static LRESULT CALLBACK surface_proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
             s->surface_event = 0x10000 | (u64)wp;
             if (ctx) ctx->last_char = 0;
         } else if (m == WM_SIZE) {
+            if (!s->surface_event) s->surface_event = m;
             s->surface_w = (u64)LOWORD(lp);
             s->surface_h = (u64)HIWORD(lp);
+        } else if (m == WM_PAINT) {
+            PAINTSTRUCT ps;
+            BeginPaint(w, &ps);
+            EndPaint(w, &ps);
+            if (!s->surface_event) s->surface_event = m;
+            if (ctx) ctx->last_char = 0;
+            return 0;
+        } else if (m == WM_ERASEBKGND) {
+            return 1;
         } else if (m == WM_CLOSE) {
             s->surface_event = 0xffffffff;
             if (ctx) ctx->last_char = 0;
@@ -108,13 +118,18 @@ static void surface_class(void) {
     wc.hInstance = GetModuleHandleW(0);
     wc.lpszClassName = L"CVM_Surface";
     wc.hCursor = LoadCursorW(0, MAKEINTRESOURCEW(32512));
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hbrBackground = 0;
     RegisterClassW(&wc);
 }
 
 static HWND surface_hwnd(void) {
     CvmState *s = cvm_state();
-    return s ? s->surface_hwnd : 0;
+    if (!s || !s->surface_hwnd) return 0;
+    if (!IsWindow(s->surface_hwnd)) {
+        s->surface_hwnd = 0;
+        return 0;
+    }
+    return s->surface_hwnd;
 }
 
 static void surface_rect_from_h(H h, RECT *r) {

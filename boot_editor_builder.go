@@ -162,6 +162,16 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.textUTF8("玩具流", 32, 28, 245, 247, 250)
 		c.textUTF8("这里收集可播放、可加到舞台、可重新发布的玩具包。", 32, 68, 148, 163, 184)
 	})
+	refreshBootBrowser := b.block("refresh_boot_browser_children", func(c *chainBuilder) {
+		c.varRead("boot.browser.view")
+		c.add("graph_children", nil)
+		c.varWrite("boot.browser.children")
+	})
+	refreshToyBrowser := b.block("refresh_toy_browser_children", func(c *chainBuilder) {
+		c.varRead("toy.browser.view")
+		c.add("graph_children", nil)
+		c.varWrite("toy.browser.children")
+	})
 	b.block("catalog_surface_tokens", func(c *chainBuilder) {
 		c.text("Surface tokens: open clear rect frame round_rect round_frame text text_utf8 clip translate char poll pos size event_clear", 24, 24, 148, 163, 184)
 	})
@@ -184,6 +194,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
 		c.add("save_boot", nil)
+		c.add("call", refreshBootBrowser[:])
 		c.pushU64(1)
 		c.varWrite("boot.editor.dirty")
 	}
@@ -193,6 +204,10 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varWrite("boot.editor.dirty")
 	}
 
+	markDirty := b.block("mark_dirty", func(c *chainBuilder) {
+		setDirty(c)
+	})
+
 	initVars := b.block("init_boot_editor_vars", func(c *chainBuilder) {
 		c.add("state_hash_get", nil)
 		c.varWrite("boot.editor.view")
@@ -200,6 +215,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
+		c.add("call", refreshBootBrowser[:])
 		c.pushHash(initialStageData)
 		c.add("dup", nil)
 		c.varWrite("toy.stage.data")
@@ -218,6 +234,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("toy.browser.view")
 		c.varWrite("toy.browser.selected")
+		c.add("call", refreshToyBrowser[:])
 		c.pushU64(0)
 		c.varWrite("toy.mode")
 		c.pushHash(toyMessageReady)
@@ -248,6 +265,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
+		c.add("call", refreshBootBrowser[:])
+		setDirty(c)
 	})
 
 	browserCatalog := b.block("browser_catalog", func(c *chainBuilder) {
@@ -255,6 +274,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
+		c.add("call", refreshBootBrowser[:])
+		setDirty(c)
 	})
 
 	insert := b.block("insert_selected_call", func(c *chainBuilder) {
@@ -365,6 +386,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varRead("boot.browser.token")
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
+		c.add("call", refreshBootBrowser[:])
 		setDirty(c)
 	})
 
@@ -372,6 +394,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call", wrapSelectedTokenStore[:])
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
+		c.add("call", refreshBootBrowser[:])
 		setDirty(c)
 	})
 
@@ -391,6 +414,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("state_hash_set", nil)
 		c.add("publish_view", nil)
 		c.add("save_boot", nil)
+		c.add("call", refreshBootBrowser[:])
 		setDirty(c)
 	})
 
@@ -402,6 +426,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
+		c.add("call", refreshBootBrowser[:])
+		setDirty(c)
 	})
 
 	selectors := make([][hashSize]byte, 8)
@@ -410,6 +436,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		selectors[i] = b.block(fmt.Sprintf("select_row_%d", i), func(c *chainBuilder) {
 			c.pushU64(idx)
 			c.varWrite("boot.editor.index")
+			setDirty(c)
 		})
 	}
 
@@ -426,6 +453,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.add("dup", nil)
 			c.varWrite("boot.browser.view")
 			c.varWrite("boot.browser.token")
+			c.add("call", refreshBootBrowser[:])
+			setDirty(c)
 		})
 	}
 
@@ -456,6 +485,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("toy.browser.view")
 		c.varWrite("toy.browser.selected")
+		c.add("call", refreshToyBrowser[:])
 		setDirty(c)
 	})
 
@@ -464,6 +494,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("toy.browser.view")
 		c.varWrite("toy.browser.selected")
+		c.add("call", refreshToyBrowser[:])
 		setDirty(c)
 	})
 
@@ -472,6 +503,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("toy.browser.view")
 		c.varWrite("toy.browser.selected")
+		c.add("call", refreshToyBrowser[:])
 		setDirty(c)
 	})
 
@@ -802,6 +834,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(640)
 		c.add("surface_open", nil)
 		c.add("pop", nil)
+		c.add("surface_event_clear", nil)
 		c.add("call", toyRuntimeFrameLoop[:])
 		c.add("surface_close", nil)
 	})
@@ -1204,6 +1237,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call", toyAppendShelf[:])
 		c.pushHash(toyMessagePublished)
 		c.varWrite("toy.message")
+		c.add("call", refreshToyBrowser[:])
 		setDirty(c)
 	})
 
@@ -1240,6 +1274,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.add("dup", nil)
 			c.varWrite("toy.browser.view")
 			c.varWrite("toy.browser.selected")
+			c.add("call", refreshToyBrowser[:])
 			setDirty(c)
 		})
 	}
@@ -1464,9 +1499,9 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.pushColor(58, 92, 88)
 			c.add("surface_frame", nil)
 			c.text(fmt.Sprintf("%02d", i), 672, y+8, 116, 211, 194)
-			c.varRead("boot.browser.view")
+			c.varRead("boot.browser.children")
 			c.pushU64(uint64(i))
-			c.add("graph_child_at", nil)
+			c.add("child_at", nil)
 			c.add("hash_hex", nil)
 			c.pushU64(710)
 			c.pushU64(y + 8)
@@ -1567,9 +1602,9 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 			c.pushU64(14)
 			c.add("surface_round_rect", nil)
 			c.textUTF8(fmt.Sprintf("%02d", i), 1018, y+13, 125, 211, 252)
-			c.varRead("toy.browser.view")
+			c.varRead("toy.browser.children")
 			c.pushU64(uint64(i))
-			c.add("graph_child_at", nil)
+			c.add("child_at", nil)
 			c.add("hash_hex", nil)
 			c.pushU64(1054)
 			c.pushU64(y + 13)
@@ -1611,6 +1646,16 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.varWrite("boot.editor.dirty")
 	})
 
+	drawIdleStage := b.block("toy_draw_idle_stage", func(c *chainBuilder) {
+		c.varRead("boot.editor.dirty")
+		c.add("not", nil)
+		c.varRead("toy.mode")
+		c.pushU64(1)
+		c.add("ne", nil)
+		c.add("and", nil)
+		c.add("call_cond_static", toyDrawStage[:])
+	})
+
 	frameLoop := b.block("boot_editor_frame_loop", func(c *chainBuilder) {
 		c.varRead("boot.editor.dirty")
 		c.add("call_cond_static", drawDirty[:])
@@ -1632,8 +1677,15 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(258)
 		c.add("eq", nil)
 		c.add("call_cond_static", toyTextInputDispatch[:])
-		c.pushU64(1)
-		c.varWrite("boot.editor.dirty")
+		c.varRead("toy.event")
+		c.pushU64(5)
+		c.add("eq", nil)
+		c.add("call_cond_static", markDirty[:])
+		c.varRead("toy.event")
+		c.pushU64(15)
+		c.add("eq", nil)
+		c.add("call_cond_static", markDirty[:])
+		c.add("call", drawIdleStage[:])
 		c.varRead("toy.event")
 		c.pushU64(0xffffffff)
 		c.add("ne", nil)
@@ -1649,6 +1701,7 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(720)
 		c.add("surface_open", nil)
 		c.add("pop", nil)
+		c.add("surface_event_clear", nil)
 		c.pushU64(1)
 		c.varWrite("boot.editor.dirty")
 		c.add("call", frameLoop[:])

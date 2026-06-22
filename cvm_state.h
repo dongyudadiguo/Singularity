@@ -38,6 +38,7 @@ typedef struct {
     u32 off;
     u32 span;
     jmp_buf *ret_jb;
+    u32 next_off;
     H view_hash;
     u64 view_index;
     H view_hash_stack[CVM_VIEW_CAP];
