@@ -1,0 +1,1 @@
+#define stdlib_ atof__, atoi__, atol__, atoll__, strtod__, strtof__, strtold__, strtol__, strtoll__, strtoul__, strtoull__, rand__, srand__, calloc__, free__, malloc__, realloc__, abort__, exit__, getenv__, system__, abs__, labs__, llabs__, div__, ldiv__, lldiv__, mblen__, mbtowc__, wctomb__, mbstowcs__

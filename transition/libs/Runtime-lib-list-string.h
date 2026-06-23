@@ -1,0 +1,1 @@
+#define string_ memcpy__, memccpy__, memmove__, strcpy__, strncpy__, strdup__, strcat__, strncat__, memcmp__, strcmp__, strcoll__, strncmp__, strxfrm__, memchr__, strchr__, strcspn__, strpbrk__, strrchr__, strspn__, strstr__, strtok__, memset__, strerror__, strlen__, strnlen__
