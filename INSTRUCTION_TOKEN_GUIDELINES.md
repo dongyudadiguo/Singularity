@@ -161,7 +161,7 @@ Its core dependencies are generic tokens only:
 - Bytes and UTF-8: `bytes_take`, `bytes_drop`, `bytes_replace`, `hash_to_bytes`, `bytes_to_hash32`, `utf8_from_codepoint`, `utf8_drop_last`
 - Records: `record_pack`, `record_pack_hash`, `records_insert`, `records_replace`, `records_delete`, `records_count`, `records_at`, `record_payload_at`
 - Rectangles and color: `rect_make`, `rect_contains`, `color_rgb`
-- Surface: `surface_open`, `surface_is_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_text_utf8`, `surface_clip_push`, `surface_clip_pop`, `surface_translate_push`, `surface_translate_pop`, `surface_poll`, `surface_char`, `surface_pos`, `surface_event_clear`
+- Surface: `surface_open`, `surface_is_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_line`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_text_utf8`, `surface_clip_push`, `surface_clip_pop`, `surface_translate_push`, `surface_translate_pop`, `surface_camera_push`, `surface_camera_pop`, `surface_poll`, `surface_char`, `surface_wheel_dir`, `surface_pos`, `surface_event_clear`
 - Network graph: `graph_children`, `graph_child_at`, `open_child`, `child_at`
 - Loop pacing: `sleep_ms`
 - State and persistence: `state_hash_get`, `state_hash_set`, `state_index_get`, `state_index_set`, `load_boot`, `save_boot`, `publish_view`

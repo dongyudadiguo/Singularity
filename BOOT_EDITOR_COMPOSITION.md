@@ -12,7 +12,7 @@ This project now has enough generic instruction tokens to compose the first boot
 - L1 record tokens: `record_pack`, `record_pack_hash`, `record_pack_u64`, `record_at`, `record_token_at`, `record_payload_at`, `records_insert`, `records_replace`, `records_delete`, `records_append`, `records_count`.
 - L2 state tokens: `state_hash_get`, `state_hash_set`, `state_index_get`, `state_index_set`, `state_index_inc`, `state_index_dec`, `state_record`, `state_record_replace`, `view_push`, `view_pop`.
 - L2 scoped variable tokens: `var_read`, `var_write`, `var_set`, `scope_start`, `scope_end`.
-- L3 platform edge tokens: `surface_open`, `surface_is_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_text_utf8`, `surface_clip_push`, `surface_clip_pop`, `surface_translate_push`, `surface_translate_pop`, `surface_poll`, `surface_char`, `surface_pos`, `surface_size`, `surface_event_clear`, `sleep_ms`, `time_ms`, `random_u64`, `load_boot`, `save_boot`, `publish_view`.
+- L3 platform edge tokens: `surface_open`, `surface_is_open`, `surface_clear`, `surface_rect`, `surface_frame`, `surface_line`, `surface_round_rect`, `surface_round_frame`, `surface_text`, `surface_text_utf8`, `surface_clip_push`, `surface_clip_pop`, `surface_translate_push`, `surface_translate_pop`, `surface_camera_push`, `surface_camera_pop`, `surface_poll`, `surface_char`, `surface_wheel_dir`, `surface_pos`, `surface_size`, `surface_event_clear`, `sleep_ms`, `time_ms`, `random_u64`, `load_boot`, `save_boot`, `publish_view`.
 - L3 network graph tokens: `graph_children`, `graph_child_at`, `open_child`, `child_at`.
 
 ## Boot Editor Blocks
@@ -38,7 +38,9 @@ This project now has enough generic instruction tokens to compose the first boot
 
 ## Toy Home Blocks
 
-- Default mode: the boot entry initializes `toy.mode = home`, opens the same surface loop, and draws Toy Home first instead of the record editor.
+- Default mode: the boot entry initializes `toy.mode = canvas`, opens the same surface loop, and draws the transition-style canvas first instead of the record editor.
+- Transition canvas: the first surface view renders the current boot block as a node graph, draws sequence links with `surface_line`, directly expands static call/control-flow targets at an offset, shows `again_cond` as a loopback, and treats `ret` as a terminal node.
+- Network graph: the public/network view is a canvas node. Clicking it calls `graph_children` once and caches the result; rendered child nodes use `child_at`, and clicking a child opens that child and refreshes the cached children.
 - Inspector mode: the previous editor draw and mouse dispatch are still present behind `toy.mode = inspector`, with a `返回玩具` action back to Toy Home.
 - Stage data: `toy.stage.data` is a record chain of `noop` records. Each payload is a 128-byte object descriptor with type, local x/y/w/h, color, radius or variant, flags or seed, primary hash, and auxiliary hash fields.
 - Stage rendering: Toy Home draws a clipped stage, translates into stage-local coordinates, stores `toy.render.data`, loops over `records_count`, parses each object payload with byte/u64 primitives, and dispatches object renderers by type.

@@ -14,7 +14,24 @@ if ([string]::IsNullOrWhiteSpace($compiler)) { $compiler = 'gcc' }
 
 $existing = @{}
 if (Test-Path -LiteralPath $mapFile) {
+    $inConflict = $false
+    $takeConflictSide = $true
     Get-Content -LiteralPath $mapFile | ForEach-Object {
+        if ($_.StartsWith('<<<<<<<')) {
+            $inConflict = $true
+            $takeConflictSide = $true
+            return
+        }
+        if ($inConflict -and $_.StartsWith('=======')) {
+            $takeConflictSide = $false
+            return
+        }
+        if ($inConflict -and $_.StartsWith('>>>>>>>')) {
+            $inConflict = $false
+            $takeConflictSide = $true
+            return
+        }
+        if ($inConflict -and -not $takeConflictSide) { return }
         $parts = $_ -split "`t"
         if ($parts.Count -eq 3 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
             $existing[$parts[0]] = [pscustomobject]@{ Name = $parts[0]; Hash = $parts[1]; File = $parts[2] }
@@ -42,4 +59,7 @@ foreach ($name in $args) {
     "{0}`t{1}`t{2}" -f $name, $hex, "$hex.dll"
 }
 
-$existing.Values | Sort-Object Name | ForEach-Object { "{0}`t{1}`t{2}" -f $_.Name, $_.Hash, $_.File } | Set-Content -LiteralPath $mapFile
+$mapLines = @($existing.Values | Sort-Object Name | ForEach-Object { "{0}`t{1}`t{2}" -f $_.Name, $_.Hash, $_.File })
+$tmpMap = "$mapFile.tmp"
+[System.IO.File]::WriteAllLines($tmpMap, $mapLines)
+Move-Item -LiteralPath $tmpMap -Destination $mapFile -Force

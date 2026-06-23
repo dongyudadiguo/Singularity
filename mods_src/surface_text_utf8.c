@@ -19,7 +19,18 @@ __declspec(dllexport) void run(void) {
                 surface_apply_clip(dc);
                 SetTextColor(dc, (COLORREF)cvm_h_to_u64(color));
                 SetBkMode(dc, TRANSPARENT);
+                HFONT font = 0;
+                HGDIOBJ old_font = 0;
+                CvmSurfaceContext *ctx = surface_context();
+                if (ctx && ctx->scale != CVM_SURFACE_SCALE_BASE) {
+                    int h = (int)surface_scale_value(18);
+                    if (h < 1) h = 1;
+                    font = CreateFontW(h, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+                    if (font) old_font = SelectObject(dc, font);
+                }
                 TextOutW(dc, (int)surface_coord_x(x_h), (int)surface_coord_y(y_h), wide, wide_len);
+                if (old_font) SelectObject(dc, old_font);
+                if (font) DeleteObject(font);
                 ReleaseDC(w, dc);
                 free(wide);
             }

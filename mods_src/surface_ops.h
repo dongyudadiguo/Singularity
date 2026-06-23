@@ -5,8 +5,9 @@
 #include "../continue.h"
 #include "../block.h"
 
-#define CVM_SURFACE_CONTEXT_MAGIC 0x53564332u
+#define CVM_SURFACE_CONTEXT_MAGIC 0x53564333u
 #define CVM_SURFACE_STACK_CAP 64
+#define CVM_SURFACE_SCALE_BASE 1000L
 
 typedef struct {
     LONG tx;
@@ -19,31 +20,48 @@ typedef struct {
 } CvmSurfaceClipFrame;
 
 typedef struct {
+    LONG tx;
+    LONG ty;
+    LONG scale;
+} CvmSurfaceCameraFrame;
+
+typedef struct {
     u32 magic;
     LONG tx;
     LONG ty;
+    LONG scale;
     int clip_active;
     RECT clip;
     CvmSurfaceTranslateFrame translate_stack[CVM_SURFACE_STACK_CAP];
     u32 translate_sp;
     CvmSurfaceClipFrame clip_stack[CVM_SURFACE_STACK_CAP];
     u32 clip_sp;
+    CvmSurfaceCameraFrame camera_stack[CVM_SURFACE_STACK_CAP];
+    u32 camera_sp;
     u32 last_char;
     u32 pending_high_surrogate;
+    LONG wheel_delta;
 } CvmSurfaceContext;
+
+static void surface_context_defaults(CvmSurfaceContext *ctx) {
+    if (!ctx) return;
+    ctx->magic = CVM_SURFACE_CONTEXT_MAGIC;
+    if (ctx->scale <= 0) ctx->scale = CVM_SURFACE_SCALE_BASE;
+}
 
 static CvmSurfaceContext* surface_context(void) {
     static CvmSurfaceContext *ctx;
     static HANDLE map;
     if (ctx) return ctx;
-    map = OpenFileMappingA(FILE_MAP_ALL_ACCESS, 0, "Local\\CVM_Surface_Context");
-    if (!map) map = CreateFileMappingA(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE, 0, sizeof(CvmSurfaceContext), "Local\\CVM_Surface_Context");
+    map = OpenFileMappingA(FILE_MAP_ALL_ACCESS, 0, "Local\\CVM_Surface_Context_V3");
+    if (!map) map = CreateFileMappingA(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE, 0, sizeof(CvmSurfaceContext), "Local\\CVM_Surface_Context_V3");
     if (!map) return 0;
     ctx = (CvmSurfaceContext*)MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(CvmSurfaceContext));
     if (ctx && ctx->magic != CVM_SURFACE_CONTEXT_MAGIC) {
         memset(ctx, 0, sizeof(*ctx));
-        ctx->magic = CVM_SURFACE_CONTEXT_MAGIC;
+        surface_context_defaults(ctx);
     }
+    surface_context_defaults(ctx);
     return ctx;
 }
 
@@ -51,11 +69,39 @@ static void surface_context_reset(void) {
     CvmSurfaceContext *ctx = surface_context();
     if (!ctx) return;
     memset(ctx, 0, sizeof(*ctx));
-    ctx->magic = CVM_SURFACE_CONTEXT_MAGIC;
+    surface_context_defaults(ctx);
 }
 
 static LONG surface_h_to_long(const H h) {
     return (LONG)cvm_h_to_u64(h);
+}
+
+static LONG surface_scale_value(LONG v) {
+    CvmSurfaceContext *ctx = surface_context();
+    LONG scale = (ctx && ctx->scale > 0) ? ctx->scale : CVM_SURFACE_SCALE_BASE;
+    return MulDiv(v, scale, CVM_SURFACE_SCALE_BASE);
+}
+
+static LONG surface_world_x(LONG x) {
+    CvmSurfaceContext *ctx = surface_context();
+    return (ctx ? ctx->tx : 0) + surface_scale_value(x);
+}
+
+static LONG surface_world_y(LONG y) {
+    CvmSurfaceContext *ctx = surface_context();
+    return (ctx ? ctx->ty : 0) + surface_scale_value(y);
+}
+
+static LONG surface_screen_to_world_x(LONG x) {
+    CvmSurfaceContext *ctx = surface_context();
+    LONG scale = (ctx && ctx->scale > 0) ? ctx->scale : CVM_SURFACE_SCALE_BASE;
+    return MulDiv(x - (ctx ? ctx->tx : 0), CVM_SURFACE_SCALE_BASE, scale);
+}
+
+static LONG surface_screen_to_world_y(LONG y) {
+    CvmSurfaceContext *ctx = surface_context();
+    LONG scale = (ctx && ctx->scale > 0) ? ctx->scale : CVM_SURFACE_SCALE_BASE;
+    return MulDiv(y - (ctx ? ctx->ty : 0), CVM_SURFACE_SCALE_BASE, scale);
 }
 
 static LRESULT CALLBACK surface_proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
@@ -98,6 +144,18 @@ static LRESULT CALLBACK surface_proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
             return 0;
         } else if (m == WM_ERASEBKGND) {
             return 1;
+        } else if (m == WM_MOUSEWHEEL) {
+            POINT p;
+            p.x = (LONG)(short)LOWORD(lp);
+            p.y = (LONG)(short)HIWORD(lp);
+            ScreenToClient(w, &p);
+            s->surface_event = WM_MOUSEWHEEL;
+            s->surface_x = (u64)p.x;
+            s->surface_y = (u64)p.y;
+            if (ctx) {
+                ctx->wheel_delta = (LONG)(short)HIWORD(wp);
+                ctx->last_char = 0;
+            }
         } else if (m == WM_CLOSE) {
             s->surface_event = 0xffffffff;
             if (ctx) ctx->last_char = 0;
@@ -135,12 +193,15 @@ static HWND surface_hwnd(void) {
 static void surface_rect_from_h(H h, RECT *r) {
     H v;
     CvmSurfaceContext *ctx = surface_context();
-    LONG tx = ctx ? ctx->tx : 0;
-    LONG ty = ctx ? ctx->ty : 0;
-    cvm_zero(v); memcpy(v, h, 8); r->left = (LONG)cvm_h_to_u64(v) + tx;
-    cvm_zero(v); memcpy(v, h + 8, 8); r->top = (LONG)cvm_h_to_u64(v) + ty;
-    cvm_zero(v); memcpy(v, h + 16, 8); r->right = r->left + (LONG)cvm_h_to_u64(v);
-    cvm_zero(v); memcpy(v, h + 24, 8); r->bottom = r->top + (LONG)cvm_h_to_u64(v);
+    (void)ctx;
+    cvm_zero(v); memcpy(v, h, 8); LONG x = surface_h_to_long(v);
+    cvm_zero(v); memcpy(v, h + 8, 8); LONG y = surface_h_to_long(v);
+    cvm_zero(v); memcpy(v, h + 16, 8); LONG width = surface_h_to_long(v);
+    cvm_zero(v); memcpy(v, h + 24, 8); LONG height = surface_h_to_long(v);
+    r->left = surface_world_x(x);
+    r->top = surface_world_y(y);
+    r->right = surface_world_x(x + width);
+    r->bottom = surface_world_y(y + height);
 }
 
 static void surface_apply_clip(HDC dc) {
@@ -151,13 +212,11 @@ static void surface_apply_clip(HDC dc) {
 }
 
 static LONG surface_coord_x(H h) {
-    CvmSurfaceContext *ctx = surface_context();
-    return surface_h_to_long(h) + (ctx ? ctx->tx : 0);
+    return surface_world_x(surface_h_to_long(h));
 }
 
 static LONG surface_coord_y(H h) {
-    CvmSurfaceContext *ctx = surface_context();
-    return surface_h_to_long(h) + (ctx ? ctx->ty : 0);
+    return surface_world_y(surface_h_to_long(h));
 }
 
 static void surface_clip_push_rect(H h) {
@@ -208,6 +267,31 @@ static void surface_translate_pop_xy(void) {
     ctx->translate_sp--;
     ctx->tx = ctx->translate_stack[ctx->translate_sp].tx;
     ctx->ty = ctx->translate_stack[ctx->translate_sp].ty;
+}
+
+static void surface_camera_push_xy_scale(LONG x, LONG y, LONG scale) {
+    CvmSurfaceContext *ctx = surface_context();
+    if (!ctx || ctx->camera_sp >= CVM_SURFACE_STACK_CAP) return;
+    if (scale <= 0) scale = CVM_SURFACE_SCALE_BASE;
+    ctx->camera_stack[ctx->camera_sp].tx = ctx->tx;
+    ctx->camera_stack[ctx->camera_sp].ty = ctx->ty;
+    ctx->camera_stack[ctx->camera_sp].scale = ctx->scale;
+    ctx->camera_sp++;
+    ctx->tx += x;
+    ctx->ty += y;
+    ctx->scale = (LONG)(((long long)ctx->scale * (long long)scale) / CVM_SURFACE_SCALE_BASE);
+    if (ctx->scale < 1) ctx->scale = 1;
+    if (ctx->scale > 8000) ctx->scale = 8000;
+}
+
+static void surface_camera_pop_xy_scale(void) {
+    CvmSurfaceContext *ctx = surface_context();
+    if (!ctx || !ctx->camera_sp) return;
+    ctx->camera_sp--;
+    ctx->tx = ctx->camera_stack[ctx->camera_sp].tx;
+    ctx->ty = ctx->camera_stack[ctx->camera_sp].ty;
+    ctx->scale = ctx->camera_stack[ctx->camera_sp].scale;
+    if (ctx->scale <= 0) ctx->scale = CVM_SURFACE_SCALE_BASE;
 }
 
 #endif

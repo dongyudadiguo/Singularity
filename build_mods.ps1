@@ -32,4 +32,7 @@ Get-ChildItem -LiteralPath $srcDir -Filter '*.c' | Sort-Object Name | ForEach-Ob
     $entries += [pscustomobject]@{ Name = $name; Hash = $hex; File = "$hex.dll" }
 }
 
-$entries | Sort-Object Name | ForEach-Object { "{0}`t{1}`t{2}" -f $_.Name, $_.Hash, $_.File } | Set-Content -LiteralPath $mapFile
+$mapLines = @($entries | Sort-Object Name | ForEach-Object { "{0}`t{1}`t{2}" -f $_.Name, $_.Hash, $_.File })
+$tmpMap = "$mapFile.tmp"
+[System.IO.File]::WriteAllLines($tmpMap, $mapLines)
+Move-Item -LiteralPath $tmpMap -Destination $mapFile -Force
