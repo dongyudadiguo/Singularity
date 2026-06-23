@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,8 +10,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"toy/blocktext"
 )
 
 const hashSize = 32
@@ -23,9 +22,10 @@ var bootKey = [hashSize]byte{'C', 'V', 'M', '_', 'B', 'O', 'O', 'T'}
 type tokenMap map[string][hashSize]byte
 
 type builtBlock struct {
-	name string
-	body []byte
-	hash [hashSize]byte
+	name   string
+	body   []byte
+	hash   [hashSize]byte
+	source []byte
 }
 
 type graphEdge struct {
@@ -38,6 +38,7 @@ func main() {
 	mapPath := flag.String("map", "mods_map.txt", "token map path")
 	idPath := flag.String("id", "id.bin", "verified user id path")
 	dryRun := flag.Bool("dry-run", false, "build and print block hashes without uploading")
+	srcDir := flag.String("src-dir", "", "optional directory for generated text block sources")
 	flag.Parse()
 
 	toks, err := readTokenMap(*mapPath)
@@ -46,6 +47,9 @@ func main() {
 	blocks := buildBootEditorBlocks(toks)
 	edges := buildBootEditorEdges(toks, blocks)
 	chainHash := blocks[len(blocks)-1].hash
+	if *srcDir != "" {
+		must(writeBlockSources(*srcDir, blocks))
+	}
 	printBlocks(blocks, edges, chainHash, toks.must("boot_run"))
 	if *dryRun {
 		return
@@ -88,6 +92,22 @@ func printBlocks(blocks []builtBlock, edges []graphEdge, chainHash [hashSize]byt
 	}
 	fmt.Printf("boot_editor_hash\t%x\n", chainHash)
 	fmt.Printf("root_token\tboot_run\t%x\n", bootRun)
+}
+
+func writeBlockSources(dir string, blocks []builtBlock) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	for _, b := range blocks {
+		if len(b.source) == 0 {
+			continue
+		}
+		path := filepath.Join(dir, b.name+".cvm.txt")
+		if err := os.WriteFile(path, b.source, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func buildBootEditorBlocks(t tokenMap) []builtBlock {
@@ -274,18 +294,8 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("dup", nil)
 		c.varWrite("boot.browser.view")
 		c.varWrite("boot.browser.token")
-<<<<<<< HEAD
 		c.add("call", refreshBootBrowser[:])
 		setDirty(c)
-=======
-		c.pushHash(t.must("noop"))
-		c.varWrite("boot.browser.token")
-		c.pushU64(0)
-		c.varWrite("boot.editor.index")
-<<<<<<< HEAD
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
-=======
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 	})
 
 	insert := b.block("insert_selected_call", func(c *chainBuilder) {
@@ -1534,8 +1544,6 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.buttonUTF8("返回玩具", 1060, 588, 160, 40, 67, 120, 86)
 		c.text("Catalog rows: 00 rounded, 01 badge, 02 shapes, 03 surface, 04 records, 05 graph, 06 payload, 07 state.", 660, 650, 148, 163, 184)
 	})
-
-<<<<<<< HEAD
 	toyDrawTextEditOverlay := b.block("toy_draw_text_edit_overlay", func(c *chainBuilder) {
 		c.rect(320, 34, 650, 62)
 		c.pushColor(76, 29, 149)
@@ -1650,8 +1658,6 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("ne", nil)
 		c.add("call_cond_static", toyDrawHome[:])
 	})
-
-<<<<<<< HEAD
 	drawDirty := b.block("boot_editor_draw_dirty", func(c *chainBuilder) {
 		c.add("call", draw[:])
 		c.pushU64(0)
@@ -1667,21 +1673,15 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("and", nil)
 		c.add("call_cond_static", toyDrawStage[:])
 	})
-
-=======
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
-=======
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 	frameLoop := b.block("boot_editor_frame_loop", func(c *chainBuilder) {
-		c.add("call", draw[:])
+		c.varRead("boot.editor.dirty")
+		c.add("call_cond_static", drawDirty[:])
 		c.add("surface_poll", nil)
 		c.varWrite("toy.event")
 		c.varRead("toy.event")
 		c.pushU64(513)
 		c.add("eq", nil)
 		c.add("call_cond_static", mouse[:])
-<<<<<<< HEAD
-<<<<<<< HEAD
 		c.varRead("toy.event")
 		c.pushU64(512)
 		c.add("eq", nil)
@@ -1704,10 +1704,6 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.add("call_cond_static", markDirty[:])
 		c.add("call", drawIdleStage[:])
 		c.varRead("toy.event")
-=======
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
-=======
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 		c.pushU64(0xffffffff)
 		c.add("ne", nil)
 		c.add("surface_event_clear", nil)
@@ -1722,15 +1718,9 @@ func buildBootEditorBlocks(t tokenMap) []builtBlock {
 		c.pushU64(720)
 		c.add("surface_open", nil)
 		c.add("pop", nil)
-<<<<<<< HEAD
-<<<<<<< HEAD
 		c.add("surface_event_clear", nil)
 		c.pushU64(1)
 		c.varWrite("boot.editor.dirty")
-=======
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
-=======
->>>>>>> parent of 06bb3e2 (Add dirty-flag redraw optimization to boot editor)
 		c.add("call", frameLoop[:])
 		c.add("surface_close", nil)
 	})
@@ -1806,18 +1796,25 @@ func buildBootEditorEdges(t tokenMap, blocks []builtBlock) []graphEdge {
 }
 
 type blockBuilder struct {
-	tokens tokenMap
-	blocks []builtBlock
+	tokens         tokenMap
+	compilerTokens blocktext.TokenMap
+	blocks         []builtBlock
 }
 
-func newBlockBuilder(t tokenMap) *blockBuilder { return &blockBuilder{tokens: t} }
+func newBlockBuilder(t tokenMap) *blockBuilder {
+	return &blockBuilder{tokens: t, compilerTokens: toBlocktextMap(t)}
+}
 
 func (b *blockBuilder) block(name string, fn func(*chainBuilder)) [hashSize]byte {
 	c := &chainBuilder{tokens: b.tokens}
 	fn(c)
-	c.end()
-	h := sha256.Sum256(c.out)
-	b.blocks = append(b.blocks, builtBlock{name: name, body: c.out, hash: h})
+	source := c.source.Source()
+	body, err := blocktext.CompileString(name, string(source), b.compilerTokens)
+	if err != nil {
+		panic(err)
+	}
+	h := sha256.Sum256(body)
+	b.blocks = append(b.blocks, builtBlock{name: name, body: body, hash: h, source: source})
 	return h
 }
 
@@ -1834,20 +1831,20 @@ func (b *blockBuilder) finish() []builtBlock {
 
 type chainBuilder struct {
 	tokens tokenMap
-	out    []byte
+	source blocktext.SourceBuilder
 }
 
 func (c *chainBuilder) add(name string, payload []byte) {
-	c.out = append(c.out, record(c.tokens.must(name), payload)...)
+	c.source.Bytes(name, payload)
 }
 
-func (c *chainBuilder) pushU64(v uint64) { c.add("payload_u64_le", u64(v)) }
+func (c *chainBuilder) pushU64(v uint64) { c.source.U64("payload_u64_le", v) }
 
-func (c *chainBuilder) pushHash(h [hashSize]byte) { c.add("payload_hash32", h[:]) }
+func (c *chainBuilder) pushHash(h [hashSize]byte) { c.source.Hash("payload_hash32", h) }
 
-func (c *chainBuilder) varRead(name string) { c.add("var_read", []byte(name)) }
+func (c *chainBuilder) varRead(name string) { c.source.String("var_read", name) }
 
-func (c *chainBuilder) varWrite(name string) { c.add("var_write", []byte(name)) }
+func (c *chainBuilder) varWrite(name string) { c.source.String("var_write", name) }
 
 func (c *chainBuilder) pushColor(r, g, b uint64) {
 	c.pushU64(r)
@@ -1865,7 +1862,7 @@ func (c *chainBuilder) rect(x, y, w, h uint64) {
 }
 
 func (c *chainBuilder) text(s string, x, y uint64, r, g, b uint64) {
-	c.add("payload_bytes", []byte(s))
+	c.source.String("payload_bytes", s)
 	c.pushU64(x)
 	c.pushU64(y)
 	c.pushColor(r, g, b)
@@ -1873,7 +1870,7 @@ func (c *chainBuilder) text(s string, x, y uint64, r, g, b uint64) {
 }
 
 func (c *chainBuilder) textUTF8(s string, x, y uint64, r, g, b uint64) {
-	c.add("payload_bytes", []byte(s))
+	c.source.String("payload_bytes", s)
 	c.pushU64(x)
 	c.pushU64(y)
 	c.pushColor(r, g, b)
@@ -1921,8 +1918,6 @@ func (c *chainBuilder) rectContains(x, y, w, h uint64) {
 	c.add("rect_contains", nil)
 }
 
-func (c *chainBuilder) end() { c.out = append(c.out, make([]byte, hashSize)...) }
-
 func u64(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, v)
@@ -1966,31 +1961,23 @@ func toyStageBlock(noop [hashSize]byte, payloads ...[]byte) []byte {
 }
 
 func readTokenMap(path string) (tokenMap, error) {
-	f, err := os.Open(path)
+	m, err := blocktext.ReadTokenMap(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
 	out := tokenMap{}
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		parts := strings.Split(s.Text(), "\t")
-		if len(parts) < 2 {
-			continue
-		}
-		raw, err := hex.DecodeString(parts[1])
-		if err != nil || len(raw) != hashSize {
-			continue
-		}
-		var h [hashSize]byte
-		copy(h[:], raw)
-		out[parts[0]] = h
-	}
-	if err := s.Err(); err != nil {
-		return nil, err
+	for name, h := range m {
+		out[name] = [hashSize]byte(h)
 	}
 	return out, nil
+}
+
+func toBlocktextMap(m tokenMap) blocktext.TokenMap {
+	out := blocktext.TokenMap{}
+	for name, h := range m {
+		out[name] = blocktext.Hash(h)
+	}
+	return out
 }
 
 func (m tokenMap) must(name string) [hashSize]byte {
