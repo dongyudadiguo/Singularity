@@ -11,6 +11,7 @@ server.go is the source code that has been deployed to the server with IP addres
 first_boot.c publishes a first boot block. By default it builds and publishes a minimal windowed first boot program:
 
 ```
+gcc -std=c99 -O2 -o first_boot.exe first_boot.c -lws2_32 -ladvapi32
 first_boot --dry-run
 first_boot
 ```
