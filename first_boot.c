@@ -15,8 +15,6 @@ typedef u8 H[32];
 
 #define DEFAULT_ADDR "118.25.42.70"
 #define DEFAULT_PORT 9000
-#define DEFAULT_BOOT_HASH "e2618d6b4e77b5d8b493f830ed67c22e15a61a7ffc84a2c70bb47897d19c515f"
-
 static const H BOOT_KEY = {0x43,0x56,0x4d,0x5f,0x42,0x4f,0x4f,0x54};
 
 static SOCKET conn = INVALID_SOCKET;
@@ -214,6 +212,134 @@ static int map_token(const char *name, H out) {
     return 0;
 }
 
+typedef struct {
+    u8 *data;
+    u32 len;
+    u32 cap;
+    H hash;
+} Chain;
+
+typedef struct {
+    H payload_u64_le;
+    H payload_bytes;
+    H color_rgb;
+    H surface_clear;
+    H surface_text_utf8;
+    H surface_poll;
+    H surface_event_clear;
+    H surface_open;
+    H surface_close;
+    H sleep_ms;
+    H ne;
+    H again_cond;
+    H pop;
+    H call;
+} BootTokens;
+
+static int chain_reserve(Chain *c, u32 extra) {
+    u32 need = c->len + extra;
+    u32 next = c->cap ? c->cap : 256;
+    u8 *p;
+    while (next < need) next *= 2;
+    if (next == c->cap) return 1;
+    p = (u8*)realloc(c->data, next);
+    if (!p) return 0;
+    c->data = p;
+    c->cap = next;
+    return 1;
+}
+
+static int chain_append(Chain *c, const void *data, u32 len) {
+    if (!chain_reserve(c, len)) return 0;
+    memcpy(c->data + c->len, data, len);
+    c->len += len;
+    return 1;
+}
+
+static int chain_record(Chain *c, const H token, const void *payload, u32 payload_len) {
+    u8 h[36];
+    u32 span = payload_len + 4;
+    memcpy(h, token, 32);
+    h[32] = (u8)span;
+    h[33] = (u8)(span >> 8);
+    h[34] = (u8)(span >> 16);
+    h[35] = (u8)(span >> 24);
+    return chain_append(c, h, sizeof(h)) && (!payload_len || chain_append(c, payload, payload_len));
+}
+
+static int chain_end(Chain *c) {
+    u8 end[32];
+    memset(end, 0, sizeof(end));
+    return chain_append(c, end, sizeof(end)) && sha256(c->data, c->len, c->hash);
+}
+
+static void chain_free(Chain *c) {
+    free(c->data);
+    memset(c, 0, sizeof(*c));
+}
+
+static int load_boot_tokens(BootTokens *t) {
+    return map_token("payload_u64_le", t->payload_u64_le) &&
+           map_token("payload_bytes", t->payload_bytes) &&
+           map_token("color_rgb", t->color_rgb) &&
+           map_token("surface_clear", t->surface_clear) &&
+           map_token("surface_text_utf8", t->surface_text_utf8) &&
+           map_token("surface_poll", t->surface_poll) &&
+           map_token("surface_event_clear", t->surface_event_clear) &&
+           map_token("surface_open", t->surface_open) &&
+           map_token("surface_close", t->surface_close) &&
+           map_token("sleep_ms", t->sleep_ms) &&
+           map_token("ne", t->ne) &&
+           map_token("again_cond", t->again_cond) &&
+           map_token("pop", t->pop) &&
+           map_token("call", t->call);
+}
+
+static int push_u64(Chain *c, const BootTokens *t, unsigned long long v) {
+    u8 payload[8];
+    for (int i = 0; i < 8; i++) payload[i] = (u8)(v >> (i * 8));
+    return chain_record(c, t->payload_u64_le, payload, sizeof(payload));
+}
+
+static int push_color(Chain *c, const BootTokens *t, u32 r, u32 g, u32 b) {
+    return push_u64(c, t, r) && push_u64(c, t, g) && push_u64(c, t, b) && chain_record(c, t->color_rgb, 0, 0);
+}
+
+static int draw_text(Chain *c, const BootTokens *t, const char *text, u32 x, u32 y, u32 r, u32 g, u32 b) {
+    return chain_record(c, t->payload_bytes, text, (u32)strlen(text)) &&
+           push_u64(c, t, x) && push_u64(c, t, y) && push_color(c, t, r, g, b) &&
+           chain_record(c, t->surface_text_utf8, 0, 0);
+}
+
+static int build_minimal_boot(Chain *entry, Chain *loop) {
+    BootTokens t;
+    if (!load_boot_tokens(&t)) return 0;
+
+    if (!push_color(loop, &t, 18, 20, 28)) return 0;
+    if (!chain_record(loop, t.surface_clear, 0, 0)) return 0;
+    if (!draw_text(loop, &t, "第一启动程序", 48, 56, 245, 247, 250)) return 0;
+    if (!draw_text(loop, &t, "这是从 transition 思路迁移来的最小首启动窗口。", 48, 104, 148, 163, 184)) return 0;
+    if (!draw_text(loop, &t, "后续完整编辑器请用 boot_editor_builder.go 生成并发布。", 48, 144, 148, 163, 184)) return 0;
+    if (!draw_text(loop, &t, "关闭窗口即可退出。", 48, 192, 116, 211, 194)) return 0;
+    if (!chain_record(loop, t.surface_poll, 0, 0)) return 0;
+    if (!push_u64(loop, &t, 0xffffffffu)) return 0;
+    if (!chain_record(loop, t.ne, 0, 0)) return 0;
+    if (!chain_record(loop, t.surface_event_clear, 0, 0)) return 0;
+    if (!push_u64(loop, &t, 33)) return 0;
+    if (!chain_record(loop, t.sleep_ms, 0, 0)) return 0;
+    if (!chain_record(loop, t.again_cond, 0, 0)) return 0;
+    if (!chain_end(loop)) return 0;
+
+    if (!push_u64(entry, &t, 960)) return 0;
+    if (!push_u64(entry, &t, 540)) return 0;
+    if (!chain_record(entry, t.surface_open, 0, 0)) return 0;
+    if (!chain_record(entry, t.pop, 0, 0)) return 0;
+    if (!chain_record(entry, t.surface_event_clear, 0, 0)) return 0;
+    if (!chain_record(entry, t.call, loop->hash, 32)) return 0;
+    if (!chain_record(entry, t.surface_close, 0, 0)) return 0;
+    return chain_end(entry);
+}
+
 static int upload_cache_dir(const char *dir, int dry_run, u32 *uploaded, u32 *skipped) {
     char pattern[MAX_PATH];
     WIN32_FIND_DATAA fd;
@@ -258,14 +384,17 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-    const char *boot_hex = DEFAULT_BOOT_HASH;
+    const char *boot_hex = 0;
     const char *cache_dir = "cache";
     const char *id_path = "id.bin";
     const char *addr = DEFAULT_ADDR;
+    int publish_cache_hash = 0;
     int dry_run = 0;
     H user, boot_hash, root, boot_run;
     char boot_hex_out[65];
     u32 uploaded = 0, skipped = 0;
+    Chain entry = {0};
+    Chain loop = {0};
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--dry-run") == 0) dry_run = 1;
@@ -275,25 +404,46 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--addr") == 0 && i + 1 < argc) addr = argv[++i];
         else { usage(); return 2; }
     }
+    publish_cache_hash = boot_hex != 0;
 
-    if (!hex_to_h(boot_hex, boot_hash)) { fprintf(stderr, "invalid boot hash\n"); return 1; }
+    if (publish_cache_hash && !hex_to_h(boot_hex, boot_hash)) { fprintf(stderr, "invalid boot hash\n"); return 1; }
     if (!read_hash_file(id_path, user)) { fprintf(stderr, "%s must exist and contain 32 bytes\n", id_path); return 1; }
 
-    char boot_path[MAX_PATH];
-    snprintf(boot_path, sizeof(boot_path), "%s\\%s", cache_dir, boot_hex);
-    u32 boot_len = 0;
-    u8 *boot_data = read_file(boot_path, &boot_len);
-    if (!boot_data) { fprintf(stderr, "missing boot cache block: %s\n", boot_path); return 1; }
-    free(boot_data);
+    if (publish_cache_hash) {
+        char boot_path[MAX_PATH];
+        snprintf(boot_path, sizeof(boot_path), "%s\\%s", cache_dir, boot_hex);
+        u32 boot_len = 0;
+        u8 *boot_data = read_file(boot_path, &boot_len);
+        if (!boot_data) { fprintf(stderr, "missing boot cache block: %s\n", boot_path); return 1; }
+        free(boot_data);
+    } else {
+        if (!build_minimal_boot(&entry, &loop)) { fprintf(stderr, "build minimal first boot failed\n"); return 1; }
+        memcpy(boot_hash, entry.hash, 32);
+    }
 
     h_to_hex(boot_hash, boot_hex_out);
     printf("boot_hash\t%s\n", boot_hex_out);
     if (dry_run) printf("mode\tdry-run\n");
 
     if (!dry_run && !connect_server(addr, DEFAULT_PORT)) { fprintf(stderr, "connect failed: %s:%d\n", addr, DEFAULT_PORT); return 1; }
-    if (!upload_cache_dir(cache_dir, dry_run, &uploaded, &skipped)) { fprintf(stderr, "cache upload failed\n"); return 1; }
-    printf("cache_blocks\t%u\n", uploaded);
-    printf("cache_skipped\t%u\n", skipped);
+
+    if (publish_cache_hash) {
+        if (!upload_cache_dir(cache_dir, dry_run, &uploaded, &skipped)) { fprintf(stderr, "cache upload failed\n"); return 1; }
+        printf("cache_blocks\t%u\n", uploaded);
+        printf("cache_skipped\t%u\n", skipped);
+    } else {
+        char loop_hex[65];
+        h_to_hex(loop.hash, loop_hex);
+        printf("mode\tbuilt-in-minimal\n");
+        printf("loop_hash\t%s\n", loop_hex);
+        if (!dry_run) {
+            H uploaded_hash;
+            if (!upload_block(loop.data, loop.len, uploaded_hash) || memcmp(uploaded_hash, loop.hash, 32) != 0) { fprintf(stderr, "upload loop block failed\n"); return 1; }
+            if (!upload_block(entry.data, entry.len, uploaded_hash) || memcmp(uploaded_hash, entry.hash, 32) != 0) { fprintf(stderr, "upload entry block failed\n"); return 1; }
+        }
+        uploaded = 2;
+        printf("generated_blocks\t%u\n", uploaded);
+    }
 
     if (!dry_run) {
         if (!set_user_boot(user, boot_hash)) { fprintf(stderr, "set CVM_BOOT failed\n"); return 1; }
@@ -307,5 +457,7 @@ int main(int argc, char **argv) {
     }
 
     printf("first_boot\tready\n");
+    chain_free(&entry);
+    chain_free(&loop);
     return 0;
 }
