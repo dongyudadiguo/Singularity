@@ -7,3 +7,12 @@ Token blocks are different: token blocks may freely compose behavior at any leve
 The id.bin in the directory is the verified identity
 
 server.go is the source code that has been deployed to the server with IP address 118.25.42.70
+
+first_boot.c publishes a local cache-backed first boot block. By default it points CVM_BOOT at the recovered toy-house boot editor block:
+
+```
+first_boot --dry-run
+first_boot
+```
+
+Use `--hash <64hex>` to publish a different cache block as the first boot entry.
