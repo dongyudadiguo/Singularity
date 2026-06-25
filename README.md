@@ -1,3 +1,5 @@
+The first startup procedure must be easily made by existing instructions, otherwise additional instructions must be added to achieve
+
 Instruction token semantics must grow from low-level, general, platform-neutral primitives toward higher-level, specialized behavior.
 
 Do not jump levels. Do not add a specialized instruction if it can be easily composed from existing lower-level instructions.
