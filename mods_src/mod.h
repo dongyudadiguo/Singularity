@@ -7,7 +7,7 @@ typedef u8 H[32];
 
 extern __declspec(dllimport) u8 *ptr;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(void);
+extern __declspec(dllimport) void *pop(u32 size);
 extern __declspec(dllimport) void push(const void *p, u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
