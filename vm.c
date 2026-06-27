@@ -38,9 +38,6 @@ u8 *recv_op() {
     return b;                                
 }
 
-void cvm_upload(void *d, u32 l, H out) { send_op(2, d, l); u8 *b = recv_op(); memcpy(out, b, 32); free(b); }  
-u8 *cvm_file(H h)          { send_op(3, h, 32); return recv_op(); }  
-void cvm_edge(H p, H c)    { u8 b[64]; memcpy(b,p,32); memcpy(b+32,c,32); send_op(4, b, 64); free(recv_op()); }  
 void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, b+4, 32); free(b); }  
 
 typedef void (*Fn)();  
