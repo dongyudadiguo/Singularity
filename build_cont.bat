@@ -1,3 +1,4 @@
 @echo off
-if not exist libvm.a call build_vm.bat
-gcc -shared cont.c -o cont.dll libvm.a -Wl,--out-implib,libcont.a -lws2_32
+call build_vmstate.bat
+call build_vmexec.bat
+gcc -shared cont.c -o cont.dll libvmstate.a libvmexec.a -Wl,--out-implib,libcont.a
