@@ -14,7 +14,7 @@ extern __declspec(dllimport) Fn imp;
 extern __declspec(dllimport) Fn find(H h);
 extern __declspec(dllimport) void cvm_firstchild(H p, H c);
 
-u8 *ptr;
+__declspec(dllexport) u8 *ptr;
 H id;
 
 static void readn(void *b, u32 n) { u32 g = 0; while (g < n) g += recv(conn, (char*)b + g, n - g, 0); }
@@ -52,7 +52,7 @@ static void cache_load(H k, H h) {
     cache_on = 1;
 }
 
-void cont() {
+__declspec(dllexport) void cont() {
     H k, h;
     Fn f;
 

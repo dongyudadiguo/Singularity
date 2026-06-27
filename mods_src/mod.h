@@ -4,8 +4,8 @@
 typedef unsigned char u8;
 typedef unsigned u32;
 
-extern u8 *ptr;
-extern void cont(void);
+extern __declspec(dllimport) u8 *ptr;
+extern __declspec(dllimport) void cont(void);
 
 static inline void *pop(void) {
     u32 n = *(u32*)(ptr - 4);

@@ -1,1 +1,1 @@
-gcc vm.c -o vm.exe -lws2_32
+gcc vm.c -o vm.exe -Wl,--out-implib,libvm.a -lws2_32
