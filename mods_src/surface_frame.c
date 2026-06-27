@@ -1,2 +1,0 @@
-#include "surface_ops.h"
-__declspec(dllexport) void run(void) { H rect,color; cvm_pop(color); cvm_pop(rect); HWND w=surface_hwnd(); if(w){RECT r; surface_rect_from_h(rect,&r); HDC dc=GetDC(w); surface_apply_clip(dc); HPEN pen=CreatePen(PS_SOLID,1,(COLORREF)cvm_h_to_u64(color)); HGDIOBJ old=SelectObject(dc,pen); MoveToEx(dc,r.left,r.top,0); LineTo(dc,r.right,r.top); LineTo(dc,r.right,r.bottom); LineTo(dc,r.left,r.bottom); LineTo(dc,r.left,r.top); SelectObject(dc,old); DeleteObject(pen); ReleaseDC(w,dc);} cnext(); }

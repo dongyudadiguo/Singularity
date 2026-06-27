@@ -1,2 +1,0 @@
-#include "net_ops.h"
-__declspec(dllexport) void run(void) { CvmState*s=cvm_state(); if(s){ u8*d=0;u32 len=0; if(net_children(s->view_hash,&d,&len)){ u32 n=len>=4?net_u32be(d):0; if(s->view_index<n&&4+s->view_index*40+32<=len){ if(s->view_sp<CVM_VIEW_CAP){memcpy(s->view_hash_stack[s->view_sp],s->view_hash,32);s->view_index_stack[s->view_sp]=s->view_index;s->view_sp++;} memcpy(s->view_hash,d+4+s->view_index*40,32);s->view_index=0;} free(d);} } cnext(); }
