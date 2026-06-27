@@ -1,11 +1,7 @@
-typedef unsigned char u8;
-typedef unsigned u32;
+#include "mod.h"
 
-extern void* pop();
-extern void push(void *, u32 size);
-extern void cont();
-
-void add() {
-    /// push(pop() + pop(), 4); 伪代码
+void add(void) {
+    u32 r = *(u32*)pop() + *(u32*)pop();
+    push(&r, 4);
     cont();
 }
