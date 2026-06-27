@@ -8,11 +8,12 @@
 
 typedef unsigned char u8;
 typedef u8 H[32];
+typedef unsigned u32;
 typedef void (*Fn)();  
 
 SOCKET conn;
 H cur;
-void (*imp)();
+Fn imp;
 
 void readn(void *b, u32 n) {
     u32 g = 0;                               
@@ -33,7 +34,7 @@ u8 *recv_op() {
     u8 h[5];                                 
     readn(h, 5);                             
     u32 l = (u32)h[1]<<24 | h[2]<<16 | h[3]<<8 | h[4];  
-    u8 *b = malloc(l+1);                     
+    u8 *b = malloc(l);                     
     readn(b, l);                             
     return b;                                
 }
