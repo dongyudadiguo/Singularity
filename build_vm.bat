@@ -1,1 +1,1 @@
-gcc vm.c -o vm.exe
+gcc vm.c -o vm.exe -lws2_32

@@ -11,9 +11,9 @@ typedef u8 H[32];
 typedef unsigned u32;
 typedef void (*Fn)();
 
-SOCKET conn;
+__declspec(dllexport) SOCKET conn;
 H cur;
-Fn imp;
+__declspec(dllexport) Fn imp;
 
 void readn(void *b, u32 n) {
     u32 g = 0;
@@ -39,9 +39,9 @@ u8 *recv_op() {
     return b;
 }
 
-void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, b+4, 32); free(b); }
+__declspec(dllexport) void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, b+4, 32); free(b); }
 
-Fn find(H h) {
+__declspec(dllexport) Fn find(H h) {
     char path[75] = "mods/";
     for (int i = 0; i < 32; i++) sprintf(path+5+i*2, "%02x", h[i]);
     strcat(path, ".dll");

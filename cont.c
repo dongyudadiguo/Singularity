@@ -9,10 +9,10 @@ typedef unsigned u32;
 typedef u8 H[32];
 typedef void (*Fn)();
 
-extern SOCKET conn;
-extern void (*imp)();
-extern Fn find(H h);
-extern void cvm_firstchild(H p, H c);
+extern __declspec(dllimport) SOCKET conn;
+extern __declspec(dllimport) Fn imp;
+extern __declspec(dllimport) Fn find(H h);
+extern __declspec(dllimport) void cvm_firstchild(H p, H c);
 
 u8 *ptr;
 H id;
