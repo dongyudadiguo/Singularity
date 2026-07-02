@@ -41,9 +41,6 @@ u8 *recv_op() {
 
 __declspec(dllexport) void cvm_firstchild(H p, H c) { send_op(5, p, 32); u8 *b = recv_op(); memcpy(c, b+4, 32); free(b); }
 
-u8 *download(H h) { send_op(3, h, 32); return recv_op(); }
-
-
 __declspec(dllexport) Fn find(H h) {
     char path[75] = "mods/";
     for (int i = 0; i < 32; i++) sprintf(path+5+i*2, "%02x", h[i]);
@@ -56,11 +53,8 @@ void walk() {
     Fn f;
     while (!(f = find(cur))) {
         H n;
-        u8 *b;
         cvm_firstchild(cur, n);
-        b = download(n);
-        memcpy(cur, b, 32);
-        free(b);
+        memcpy(cur, n, 32);
     }
     imp = f;
 }
