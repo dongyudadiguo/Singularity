@@ -8,37 +8,46 @@ typedef void (*Fn)();
 
 extern __declspec(dllimport) Fn imp;
 extern __declspec(dllimport) Fn find(H h);
-extern __declspec(dllimport) void cvm_firstchild(H p, H c);
-extern __declspec(dllimport) u8 *cvm_payload(void);
-extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) u8 *cvm_current_base(void);
 extern __declspec(dllimport) u8 *cvm_current_key(void);
 extern __declspec(dllimport) void cvm_set_current(const H k, u8 *base);
-extern __declspec(dllimport) void cvm_cache_flush(void);
-extern __declspec(dllimport) int cvm_hash_same(const H a, const H b);
-extern __declspec(dllimport) int cvm_resolve_payload_hash(const H k, H h);
+extern __declspec(dllimport) void cvm_advance(H next);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
 extern __declspec(dllimport) u32 cvm_cached_len(void);
+extern __declspec(dllimport) int cvm_resolve_payload_hash(const H k, H h);
 extern __declspec(dllimport) void cvm_upload_async(const u8 *p, u32 n);
+extern __declspec(dllimport) u8 *cvm_payload(void);
+extern __declspec(dllimport) u32 cvm_payload_size(void);
+extern __declspec(dllimport) int cvm_hash_same(const H a, const H b);
 
-static void start_fn(Fn f, const H k, u8 *base) {
-    cvm_set_current(k, base);
+static void start_fn(Fn f) {
     imp = f;
 }
 
-__declspec(dllexport) void cvm_exec(const H k) {
-    H h, child;
+/*
+ * cvm_exec(token) works as the VM dispatcher:
+ *   1. Directly try mods/<token>.dll!run.  On hit, set imp and return.
+ *   2. On miss, treat token as a block key.  Resolving the block checks the
+ *      one-entry cache first; on cache hit it verifies hash/content consistency
+ *      and schedules non-blocking user-override + file upload if dirty.  On
+ *      cache miss it requests user override and falls back to getfirstchild.
+ *   3. Enter the resolved block by recording current key/base, then continue
+ *      the dispatch loop with the first token in that block.  cvm_advance()
+ *      consumes token[32] + payload_size[u32] + payload bytes.
+ */
+__declspec(dllexport) void cvm_exec(const H in) {
+    H token, h;
     Fn f;
 
-    cvm_cache_flush();
+    memcpy(token, in, 32);
+    for (;;) {
+        f = find(token);
+        if (f) { start_fn(f); return; }
 
-    f = find((u8*)k);
-    if (f) { start_fn(f, k, cvm_current_base()); return; }
-
-    cvm_resolve_payload_hash(k, h);
-    f = find(h);
-    if (!f) { cvm_firstchild(h, child); f = find(child); }
-    start_fn(f, k, cvm_cached_base());
+        cvm_resolve_payload_hash(token, h);
+        cvm_set_current(token, cvm_cached_base());
+        cvm_advance(token);
+    }
 }
 
 __declspec(dllexport) void cvm_exec_payload(H k) {
@@ -58,9 +67,6 @@ __declspec(dllexport) void cvm_exec_payload(H k) {
 
 __declspec(dllexport) void cvm_reexec(void) {
     H k;
-    Fn f;
     memcpy(k, cvm_current_key(), 32);
-    f = find(k);
-    if (f) start_fn(f, k, cvm_current_base());
-    else cvm_set_current(k, cvm_current_base());
+    cvm_exec(k);
 }

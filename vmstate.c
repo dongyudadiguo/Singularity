@@ -22,6 +22,6 @@ __declspec(dllexport) void cvm_set_current(const H k, u8 *base) {
 }
 
 __declspec(dllexport) void cvm_advance(H next) {
-    ptr += 32 + *(u32*)(ptr + 32);
     memcpy(next, ptr, 32);
+    ptr += 32 + 4 + *(u32*)(ptr + 32);
 }
