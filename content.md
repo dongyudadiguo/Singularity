@@ -2397,8 +2397,8 @@ C,无限制
 
 ### 5
 一个block的格式是：
-token[32] + payload_size[u32] + payload[payload_size]
-token[32] + payload_size[u32] + payload[payload_size]
+token[32] + payload[payload_size] + payload_size[u32] 
+token[32] + payload[payload_size] + payload_size[u32] 
 ...
 000000.... // 32字节全零，作为结尾标记，不会被执行
 
