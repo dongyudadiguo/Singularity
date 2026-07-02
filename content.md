@@ -3997,3 +3997,58 @@ build_vm.bat
 ## user
 
 继续刚才的，还有什么疑问吗？
+
+## assistant
+
+有。`vm.c` 的这个 bug 已经按你的伪代码修了，但继续做“全零 firstchild 文件 block 作为首运行程序”前，还有一个核心点必须确认：
+
+当前修完后的 `vm.c` 只做了这件事：
+
+```c
+cur = *(H*)download(getfirstchild(cur));
+```
+
+然后找到本地 mod 后直接：
+
+```c
+imp = f;
+while (1) imp();
+```
+
+问题是：它没有把下载到的 block 设置到 `vmstate.c` 的 `ptr/current_base`。而现有大多数 mod，尤其是 `drawtext/drawrect/cond_payload/var_*_payload/cont`，都依赖：
+
+```c
+extern __declspec(dllimport) u8 *ptr;
+cvm_payload()
+cont()
+```
+
+这些来自 `vmstate.dll`。如果 `vm.c` 只是取 block 的第一个 token 去找 mod，但不初始化 `vmstate.ptr`，那么首个 payload mod 没法读自己的 payload，`cont()` 也没法继续执行 block 后续 token。
+
+所以现在最大的疑问是：
+
+**首运行 block 的第一个 token 是否允许依赖 payload/cont？**
+
+如果允许，那我需要你确认下面两种做法选哪种：
+
+1. **允许 `vm.c` 在下载 block 后调用 `vmstate.dll!cvm_set_current`**  
+   这会让 `ptr` 指向 block，现有 payload mod 才能正常工作。代价是 `vm.c` 不再是完全无依赖启动逻辑，会运行时加载 `vmstate.dll`。
+
+2. **保持 `vm.c` 完全单文件无依赖**  
+   那么首运行 block 的第一个 token 只能是“不依赖 `ptr/payload/cont` 的本地 mod”。现有可用的基本只有 `halt` 这类，无法组成真正的图形首运行程序。要继续就需要新增一个 bootstrap mod，但你说新增 mod 需要确认。
+
+另外还有几个较小但也要确认的点：
+
+1. `vm.c` 下载 firstchild 文件后，现在只取文件前 32 字节作为下一个 hash。这个文件本身是否就是完整 block？如果是，后续必须保存这个 block 指针给 `vmstate`。
+
+2. block 结尾是 32 字节全零，但当前 `cont.c` 还没有处理“全零 token 结尾不执行”。要让 block 正常结束，需要改 `cont.c`，这个属于核心修 bug，我建议允许。
+
+3. 现有 `vmexec.c` 进入 block 时会先 `cvm_advance(token)`，这会导致 payload mod 读到的可能不是当前 token 的 payload，而是下一条记录的 payload。这里我需要确认你的语义：mod 执行时，`ptr` 应该指向“当前 token 记录开头”，还是“下一条 token 记录开头”？按你给的 block 格式，我判断应该是当前记录开头。
+
+4. 首运行程序由现有 mod 组成，那我下一步需要建立 `mod名 -> dll hash token` 的映射。当前 `mods` 目录 hash 是 DLL 文件内容 SHA256，构建脚本会先生成语义名 dll 再重命名。这个映射我可以通过临时复编当前源码得到，不需要新增 mod。
+
+我建议下一步先确认这句话：
+
+**允许为了让现有 mod 组成的 block 正常运行，调整 `vm.c` 调用 `cvm_set_current`，并修 `cont.c/vmexec.c` 的 `ptr` 语义。**
+
+如果你不允许，那“首运行程序由现有 mod 组成”在当前架构下只能走到找到第一个 mod，不能真正执行一个带 payload 的 block。
