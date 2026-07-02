@@ -4,6 +4,7 @@ setlocal enabledelayedexpansion
 call build_cont.bat
 call build_vmstack.bat
 call build_vmvar.bat
+call build_dxgfx.bat
 gcc -shared mods_src/add.c -o mods/add.dll libcont.a libvmstack.a libvmstate.a
 gcc -shared mods_src/ret.c -o mods/ret.dll libcont.a libvmstate.a
 gcc -shared mods_src/halt.c -o mods/halt.dll
@@ -32,6 +33,12 @@ gcc -shared mods_src/var_set.c -o mods/var_set.dll libcont.a libvmstack.a libvmv
 gcc -shared mods_src/var_set_payload.c -o mods/var_set_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
 gcc -shared mods_src/scope_start.c -o mods/scope_start.dll libcont.a libvmvar.a libvmstate.a
 gcc -shared mods_src/scope_end.c -o mods/scope_end.dll libcont.a libvmvar.a libvmstate.a
+
+gcc -shared mods_src/keyboard.c -o mods/keyboard.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
+gcc -shared mods_src/mouse.c -o mods/mouse.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
+gcc -shared mods_src/drawtext.c -o mods/drawtext.dll libcont.a libvmstate.a libdxgfx.a
+gcc -shared mods_src/drawrect.c -o mods/drawrect.dll libcont.a libvmstate.a libdxgfx.a
+gcc -shared mods_src/drawline.c -o mods/drawline.dll libcont.a libvmstate.a libdxgfx.a
 
 echo.
 echo === 重命名 DLL 为 SHA-256 哈希名 ===
