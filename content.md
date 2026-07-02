@@ -2415,3 +2415,671 @@ vm.c不能修改.
 ---
 
 首运行程序由现有mod组成，而不是单个mod，新建mod需要跟我确认
+
+## assistant
+
+我会先把新版现有 mod 的实际 dll 文件名和源码对应关系摸清楚，因为首块必须写入 32 字节 token。接下来只读取 `Singularity` 下允许的源码/目录，不碰 `content.md` 和 `agent`。
+
+### tool python call_HYd4sK6GCGAcozaDNmT6rzDX
+
+```
+from pathlib import Path
+base=Path(r'C:\Users\12159\Desktop\Singularity')
+for d in ['mods','mods_src']:
+    print('##', d)
+    for p in sorted((base/d).iterdir(), key=lambda x:x.name.lower()):
+        print(p.name, p.stat().st_size if p.is_file() else 'DIR')
+
+```
+
+## tool call_HYd4sK6GCGAcozaDNmT6rzDX
+
+```text
+## mods
+0110dfcc074ca4d5de2d2e75a4d02de1cc394b299972c2554c3d56f85bb0222e.dll 38182
+0196892912c28d1b70a598da573c2afbba2d7a1ef5e7f67f4c9bc10b8214c943.dll 38295
+029bde7a43d4374f0ab0f7a0907692a67af8dc110252a72f5eefd7996787c0a5.dll 38650
+06e175065f4102f1844b7dc33dd2dabb64e47568ef4ae2534d2c59caff2c5279.dll 37800
+06eafff95068b18d253591f2bd613cc48a7a89c837166ddba8819429c2705330.dll 38295
+080ff6105fa6d39e2cceb77d3cd1424da83c7e90d46efbff2e9d35dddaf5c7d3.dll 38295
+0e79cbc51f1d0483ca4a732073191bc76a4393d2ad97e9fc82914bd9a812384c.dll 38295
+16577659c81ea9eb393c4444adb72844ffa73ba5be6dcd70dcea35575e5246ed.dll 38490
+18b203f7e9ea0d21478bde589cb1e2691ea7b70d08b10274d87a2cbae053f389.dll 38178
+20232682597112b6b746bbe016a18bd7c3b551e85ddd8fca21c73713f7b69660.dll 38295
+24517410778653a635671a04165e187943b4757b3eab451c4de4bf085e7a88f7.dll 38477
+25ddd03e7f8ecf97fef62c43ae57185b92748bd35fbefd3996eb85ab48357069.dll 38477
+2d84bfa8dd1b7b4d9063f56ba7629becc04e63939c82579bd828e34e451286d8.dll 38490
+31f73d721b7f6e5d5dd7ac7d4d47d363c4e03771785676ffc53258013c3a4adf.dll 37351
+38ce29680d77fbbf13bcc48db538109cc72537a2e54e697a11b16b64276c0655.dll 39172
+3e0d6ed03b2a4098055a1663fe8d760eb56993f986c282c14e89304016b99178.dll 39004
+3f1b3b7f5f2e50d7244e87cff374f365d93abbe28c7097725297e899167308be.dll 38295
+4574350cf91f556e19c72b5ddae01a7a2fb9447ab0ed02b670b7aae1e76ce11d.dll 38295
+4b4c870f342ef8616bd845d0573e9658cae0d4d21fbd030cfe52d99c39cd4be1.dll 38295
+4f59475ec233bb7601ef3ea97f8ff5dafc3dd372bbe10c08545b4b6237663873.dll 38490
+52fbd292725b58eae4d4f1b7b55ef89769de1d07ce5654b1515c7eb603bd2ad5.dll 39004
+544d71488dca4ce2d92a2a8c4f5d3e15ef247408779aca6ae88658ccf503f03b.dll 38676
+55cdfc680750049a70d2bc6d0bdb162bf040e5d650854dcb49431d25c2b83197.dll 39004
+585a13fb0ba59f0d3db8d42fa0e9f640571bc7ef7c7cb3725401125496811a8f.dll 38295
+5ecceb947b9ac23795eb9c19eff7b695888b4d6b84d386a59ad8320964e571c9.dll 38295
+60694d26970353f581f2cbdf7cd98b6f778fb3a93d51b7d2ea3e47a8f43cbc62.dll 38295
+61c8a1f2ac5c66bd7f6e64407f69b17773c392ecb769cee583e923ff1fb6dc06.dll 39172
+667a9340b6cb73135b4cdc3cb45e9592cfc9c804f5f660acb4dccbeb50a037de.dll 38627
+6d6e24d525eceeb97aec755b36c7cff4b463b9b602623fd946eb22eb50358034.dll 38295
+6eaf8906eac5f710b16a6269d53c93e269639978ece6bcefdb415e01ef4a2be9.dll 38295
+6fe25d75d746528df16c7b34ac346a653b0b312e99f6ef01669e3bdfd23d052b.dll 37351
+705f41bd6aa60a7bff5d90e4e9d9a245a111d749d95bfc796ef83f12d3873dc2.dll 38295
+70d1f033d63613b07206e7c357c3a191f1ba3e641b79e65de2933f2ee2ef455f.dll 38178
+71fb1796cabcb9a6bb7efe4d614e8e1c0c13ea4c329f4b50c9857492f47c411d.dll 38295
+748562647d74f3397e621955aada22861bd0c6e8780e1522f4f950f4ab5779b5.dll 38295
+76aeb386ef04f1dc2cb12bce822ac7795670b2d939b016a4571e6ad59cc1f566.dll 38490
+7a4dcc3143e583c9119b758b4a300740f0d01fd060ec8fa7e6b5de98086faffe.dll 38295
+8264d4915f117c59684eec8a01dafccda78e5900c9b94d88d724551b32e47f56.dll 38490
+834b354b74c1dda1f78991d42d970be38bc68316599f0f20c8e0c04643d36df6.dll 38295
+8600f50e69a6a2a1e99819c8b4d5744e0ae237816eab404de659faca8faacf8d.dll 38993
+8768be2a2a6404cb3d85dbc5eaabd3e797b675448652ff246e672474ddebde6d.dll 38182
+924506cdb8254308ae5bcc5ae613f79cf888203a293a222ff076951a9799eaf5.dll 38295
+95b25fc1b8ef6ebf50b372d63adf4c946867f9cf9f75e8309b47864632cfee13.dll 38477
+99a99b5595bf15e3bd683b5fb820f5725d775b4bac59623e28b41c9d71f0e2d4.dll 38295
+99efe677242923ab7d2716ba5dbe84ecea78074224909a9674bc0778569eeebb.dll 38182
+9a7b84a6b83f261bf0782da6ffe64eca62e5b93f8375219dd02bc64f8fb3422b.dll 39004
+9e7fcc1c4b112632fc9c770f0cfd09abae30fb635433ca911bd7720d4e32aacf.dll 38477
+9ee9b4c5b2223f2c4d31261f7d4e4bdfdbacc514ce11626f93be45e015084ada.dll 38650
+9f81e7539f5b311e986b9abf6941d854f650a56333c2c18af6c0b027a870ffaf.dll 38627
+a07a06c56b47dfe5f2ff5f70b3a0df950f7a944aacda254c15f2161dbc04c306.dll 37800
+a535aa0484dafbcfdea24368df339eb204509a8a7bff6ad5548d3c36846005f8.dll 38490
+a5fd3e5a13997f98a89fcbc37a2b8193cbe69fabcd71b5fb699246e183b6b7c8.dll 38295
+a60517f1aedf4c54bd65fe5b5d68f78ccae020797b67ac394c4e5d4438672365.dll 37351
+acc936668ab9783ffd906dd8c2418de71350aba931558576e69093d5cc5dd1cd.dll 38993
+b222d4dbfb0d4691ca506676b28d82b46ca1dbed621a5ad97d163a65ff6fc1d3.dll 38993
+b42ba07a0c86538869bd7561e6422cd207daae7e4df66ebb836c578b23ceee4d.dll 38178
+b51995f01bd856ccdafa419af3f8f91440ce39679ff72e80a79b18e9b2baf073.dll 38676
+b83b7553664740a0104e5cf3a0c98ff7da8fd9998578b8a20681584a759e514a.dll 38490
+badbcbafda3932250a7c9dceb9de2b65f5a368a43fa7e1c46d4b349504421887.dll 38162
+bcccbb2a55d6b5827d779d8bc80231a2b2d23ae2a9f5da91806baca8771b1743.dll 38295
+bf7f1e7fbd6de7f49e3233f76f013d67f83de5f42b238483e221b8e11ad84043.dll 38295
+c62e365ab24c77999d1f24bd76aa2758d6bf737e3ae39c05f9836f7fb1ffdac5.dll 38295
+cd40e0a20f0aeae96f6d6e9ab24ea7676257d3492edf1d149bb005188bf908ee.dll 38627
+d09c98b2165a8992a8940a5738550287a3297ac96b5ab9ff7bec43edb9627ceb.dll 38295
+d21325c40346f4e000ec7ae6f448ab994ac15938bac0431aabe855bed24fe6a6.dll 38295
+d28e47be185580078938c89941707793e0c93a6278e81e009e6ac3374c22a5c0.dll 38295
+d66e5b1e4f7be5d58d7d39294572c19829490161d28a7d1bb9feaaca6edd13ab.dll 38295
+d7297850b282f6234cd21082aac5e6fc7cb8310e5dd9393b592571f2e77a6380.dll 38650
+d7ccbf62b0758fa9814802dba146cde12738cea582d7d9a02122a9fddc611d80.dll 38676
+e54dfdbae4295595f0c1bfaccd60abec7aecd00fce87bc74c0b0db81361cfd7b.dll 39172
+e5ae4f2d87900773662b7e3c55f2133297cbaa31b7b6edf9c6957a2c1efe659a.dll 38295
+ed6c89f285f4bb6536944427e2deffe8ba21f7082496c01e487c105af8b9e641.dll 38162
+f558259802aafb2e8240dd3019e7c009c15eadfadca8b8ad44f0b60439e0f395.dll 38295
+f7da1b3ca5a429a4b3b82ad031a301e9d15240bf3fd6da82fff84c0ef459eb8c.dll 37351
+## mods_src
+add.c 170
+and.c 187
+cond.c 218
+cond_payload.c 286
+cond_reexec.c 122
+div.c 178
+drawline.c 552
+drawrect.c 601
+drawtext.c 482
+eq.c 181
+gt.c 180
+gte.c 181
+halt.c 98
+keyboard.c 222
+lt.c 180
+lte.c 181
+mod.c 178
+mod.h 1186
+mouse.c 191
+mul.c 170
+neq.c 181
+not.c 152
+or.c 187
+reexec.c 82
+ret.c 91
+scope_end.c 96
+scope_start.c 98
+sub.c 170
+var_read.c 245
+var_read_payload.c 303
+var_set.c 216
+var_set_payload.c 276
+var_write.c 293
+var_write_payload.c 353
+
+```
+
+## assistant
+
+现有 `mods` 是 hash 命名的 dll，源码是语义名。我要先验证命名规则是不是由源码名派生；如果规则不成立，就只能通过构建脚本或二进制特征去建立映射。
+
+### tool python call_aNHlTiYFbad22W5DeZkNVc0U
+
+```
+from pathlib import Path
+import hashlib
+base=Path(r'C:\Users\12159\Desktop\Singularity')
+mods={p.stem for p in (base/'mods').glob('*.dll')}
+for src in sorted((base/'mods_src').glob('*.c')):
+    names=[src.stem, src.name]
+    hits=[]
+    for s in names:
+        h=hashlib.sha256(s.encode()).hexdigest()
+        if h in mods: hits.append((s,h))
+    if hits: print(src.name, hits)
+print('sha256 lowercase stem count:', sum(1 for src in (base/'mods_src').glob('*.c') if hashlib.sha256(src.stem.encode()).hexdigest() in mods))
+```
+
+## tool call_aNHlTiYFbad22W5DeZkNVc0U
+
+```text
+sha256 lowercase stem count: 0
+
+```
+
+## assistant
+
+### tool python call_UbzerjtLwA0ooMn7XFLshpqT
+
+```
+from pathlib import Path
+base=Path(r'C:\Users\12159\Desktop\Singularity')
+for p in sorted(base.glob('build*.bat'))+[base/'run.bat']:
+    print('\n##',p.name)
+    print(p.read_text(encoding='utf-8',errors='ignore'))
+```
+
+## tool call_UbzerjtLwA0ooMn7XFLshpqT
+
+```text
+
+## build_cont.bat
+@echo off
+call build_vmstate.bat
+call build_vmexec.bat
+gcc -shared cont.c -o cont.dll libvmstate.a libvmexec.a -Wl,--out-implib,libcont.a
+
+
+## build_dxgfx.bat
+@echo off
+g++ -shared dxgfx.cpp -o dxgfx.dll -ld2d1 -ldwrite -lole32 -lgdi32 -luser32 -Wl,--out-implib,libdxgfx.a
+
+
+## build_mods.bat
+@echo off
+setlocal enabledelayedexpansion
+
+call build_cont.bat
+call build_vmstack.bat
+call build_vmvar.bat
+call build_dxgfx.bat
+gcc -shared mods_src/add.c -o mods/add.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/ret.c -o mods/ret.dll libcont.a libvmstate.a
+gcc -shared mods_src/halt.c -o mods/halt.dll
+gcc -shared mods_src/sub.c -o mods/sub.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mul.c -o mods/mul.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/div.c -o mods/div.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mod.c -o mods/mod.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/eq.c -o mods/eq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/neq.c -o mods/neq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gt.c -o mods/gt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lt.c -o mods/lt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gte.c -o mods/gte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lte.c -o mods/lte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/and.c -o mods/and.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/or.c -o mods/or.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/not.c -o mods/not.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/cond.c -o mods/cond.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/cond_payload.c -o mods/cond_payload.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/reexec.c -o mods/reexec.dll libvmexec.a libvmstate.a libvm.a
+gcc -shared mods_src/cond_reexec.c -o mods/cond_reexec.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/var_read.c -o mods/var_read.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_read_payload.c -o mods/var_read_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_write.c -o mods/var_write.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_write_payload.c -o mods/var_write_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_set.c -o mods/var_set.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_set_payload.c -o mods/var_set_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/scope_start.c -o mods/scope_start.dll libcont.a libvmvar.a libvmstate.a
+gcc -shared mods_src/scope_end.c -o mods/scope_end.dll libcont.a libvmvar.a libvmstate.a
+
+gcc -shared mods_src/keyboard.c -o mods/keyboard.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
+gcc -shared mods_src/mouse.c -o mods/mouse.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
+gcc -shared mods_src/drawtext.c -o mods/drawtext.dll libcont.a libvmstate.a libdxgfx.a
+gcc -shared mods_src/drawrect.c -o mods/drawrect.dll libcont.a libvmstate.a libdxgfx.a
+gcc -shared mods_src/drawline.c -o mods/drawline.dll libcont.a libvmstate.a libdxgfx.a
+
+echo.
+echo === 重命名 DLL 为 SHA-256 哈希名 ===
+for %%f in (mods\*.dll) do call :hash_rename "%%f"
+echo === 完成 ===
+goto :eof
+
+:hash_rename
+for /f "skip=1 delims=" %%h in ('certutil -hashfile "%~1" SHA256') do set "hash=%%h" & goto :got_hash
+:got_hash
+set "hash=!hash: =!"
+if /i not "%%~nx1"=="!hash!.dll" (
+    if not exist "mods\!hash!.dll" (
+        ren "%~1" "!hash!.dll"
+        echo %%~nx1 -^> !hash!.dll
+    ) else (
+        echo 警告: !hash!.dll 已存在，跳过 %%~nx1
+    )
+) else (
+    echo 跳过 %%~nx1 (已是哈希名^)
+)
+goto :eof
+
+
+## build_vm.bat
+gcc vm.c -o vm.exe -Wl,--out-implib,libvm.a -lws2_32
+
+## build_vmexec.bat
+@echo off
+call build_vm.bat
+call build_vmstate.bat
+call build_vmstore.bat
+gcc -shared vmexec.c -o vmexec.dll libvm.a libvmstate.a libvmstore.a -Wl,--out-implib,libvmexec.a
+
+
+## build_vmstack.bat
+@echo off
+call build_vmstate.bat
+gcc -shared vmstack.c -o vmstack.dll libvmstate.a -Wl,--out-implib,libvmstack.a
+
+
+## build_vmstate.bat
+@echo off
+gcc -shared vmstate.c -o vmstate.dll -Wl,--out-implib,libvmstate.a
+
+
+## build_vmstore.bat
+@echo off
+call build_vm.bat
+gcc -shared vmstore.c -o vmstore.dll libvm.a -Wl,--out-implib,libvmstore.a -lws2_32 -ladvapi32
+
+
+## build_vmvar.bat
+@echo off
+call build_vmstate.bat
+gcc -shared vmvar.c -o vmvar.dll libvmstate.a -Wl,--out-implib,libvmvar.a
+
+## run.bat
+python agent/ae.py content.md
+
+```
+
+## assistant
+
+构建脚本说明 token 实际是 `SHA256(dll 文件内容)`，不是名字哈希。为了不用猜，我会尝试从现有 dll 中反查源码名；如果二进制里没有路径/符号，就需要用同一构建命令临时复编来得到语义名到 hash 的映射。
+
+### tool python call_mTQ9kguoetJZH1E42wwVokLq
+
+```
+from pathlib import Path
+base=Path(r'C:\Users\12159\Desktop\Singularity')
+need=[p.stem for p in (base/'mods_src').glob('*.c')]
+for dll in sorted((base/'mods').glob('*.dll'))[:5]:
+    data=dll.read_bytes().lower()
+    hits=[name for name in need if name.encode() in data]
+    print(dll.name, hits[:10])
+print('--- all hits summary ---')
+for dll in sorted((base/'mods').glob('*.dll')):
+    data=dll.read_bytes().lower()
+    hits=[name for name in need if name.encode() in data]
+    if hits:
+        print(dll.stem, hits)
+
+```
+
+## tool call_mTQ9kguoetJZH1E42wwVokLq
+
+```text
+0110dfcc074ca4d5de2d2e75a4d02de1cc394b299972c2554c3d56f85bb0222e.dll ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'scope_start', 'sub']
+0196892912c28d1b70a598da573c2afbba2d7a1ef5e7f67f4c9bc10b8214c943.dll ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+029bde7a43d4374f0ab0f7a0907692a67af8dc110252a72f5eefd7996787c0a5.dll ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_write']
+06e175065f4102f1844b7dc33dd2dabb64e47568ef4ae2534d2c59caff2c5279.dll ['add', 'and', 'halt', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+06eafff95068b18d253591f2bd613cc48a7a89c837166ddba8819429c2705330.dll ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+--- all hits summary ---
+0110dfcc074ca4d5de2d2e75a4d02de1cc394b299972c2554c3d56f85bb0222e ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'scope_start', 'sub']
+0196892912c28d1b70a598da573c2afbba2d7a1ef5e7f67f4c9bc10b8214c943 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+029bde7a43d4374f0ab0f7a0907692a67af8dc110252a72f5eefd7996787c0a5 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_write']
+06e175065f4102f1844b7dc33dd2dabb64e47568ef4ae2534d2c59caff2c5279 ['add', 'and', 'halt', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+06eafff95068b18d253591f2bd613cc48a7a89c837166ddba8819429c2705330 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+080ff6105fa6d39e2cceb77d3cd1424da83c7e90d46efbff2e9d35dddaf5c7d3 ['add', 'and', 'lt', 'lte', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+0e79cbc51f1d0483ca4a732073191bc76a4393d2ad97e9fc82914bd9a812384c ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+16577659c81ea9eb393c4444adb72844ffa73ba5be6dcd70dcea35575e5246ed ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_set']
+18b203f7e9ea0d21478bde589cb1e2691ea7b70d08b10274d87a2cbae053f389 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'scope_end', 'sub']
+20232682597112b6b746bbe016a18bd7c3b551e85ddd8fca21c73713f7b69660 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+24517410778653a635671a04165e187943b4757b3eab451c4de4bf085e7a88f7 ['add', 'and', 'cond', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+25ddd03e7f8ecf97fef62c43ae57185b92748bd35fbefd3996eb85ab48357069 ['add', 'and', 'cond', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+2d84bfa8dd1b7b4d9063f56ba7629becc04e63939c82579bd828e34e451286d8 ['add', 'and', 'cond', 'cond_reexec', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+31f73d721b7f6e5d5dd7ac7d4d47d363c4e03771785676ffc53258013c3a4adf ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+38ce29680d77fbbf13bcc48db538109cc72537a2e54e697a11b16b64276c0655 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_write', 'var_write_payload']
+3e0d6ed03b2a4098055a1663fe8d760eb56993f986c282c14e89304016b99178 ['add', 'and', 'cond', 'cond_payload', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+3f1b3b7f5f2e50d7244e87cff374f365d93abbe28c7097725297e899167308be ['add', 'and', 'gt', 'gte', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+4574350cf91f556e19c72b5ddae01a7a2fb9447ab0ed02b670b7aae1e76ce11d ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+4b4c870f342ef8616bd845d0573e9658cae0d4d21fbd030cfe52d99c39cd4be1 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+4f59475ec233bb7601ef3ea97f8ff5dafc3dd372bbe10c08545b4b6237663873 ['add', 'and', 'cond', 'cond_reexec', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+52fbd292725b58eae4d4f1b7b55ef89769de1d07ce5654b1515c7eb603bd2ad5 ['add', 'and', 'cond', 'cond_payload', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+544d71488dca4ce2d92a2a8c4f5d3e15ef247408779aca6ae88658ccf503f03b ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_set', 'var_set_payload']
+55cdfc680750049a70d2bc6d0bdb162bf040e5d650854dcb49431d25c2b83197 ['add', 'and', 'cond', 'cond_payload', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+585a13fb0ba59f0d3db8d42fa0e9f640571bc7ef7c7cb3725401125496811a8f ['add', 'and', 'lt', 'lte', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+5ecceb947b9ac23795eb9c19eff7b695888b4d6b84d386a59ad8320964e571c9 ['add', 'and', 'gt', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+60694d26970353f581f2cbdf7cd98b6f778fb3a93d51b7d2ea3e47a8f43cbc62 ['add', 'and', 'eq', 'lt', 'mod', 'mul', 'neq', 'not', 'or', 'ret', 'sub']
+61c8a1f2ac5c66bd7f6e64407f69b17773c392ecb769cee583e923ff1fb6dc06 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_write', 'var_write_payload']
+667a9340b6cb73135b4cdc3cb45e9592cfc9c804f5f660acb4dccbeb50a037de ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_read']
+6d6e24d525eceeb97aec755b36c7cff4b463b9b602623fd946eb22eb50358034 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+6eaf8906eac5f710b16a6269d53c93e269639978ece6bcefdb415e01ef4a2be9 ['add', 'and', 'gt', 'gte', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+6fe25d75d746528df16c7b34ac346a653b0b312e99f6ef01669e3bdfd23d052b ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+705f41bd6aa60a7bff5d90e4e9d9a245a111d749d95bfc796ef83f12d3873dc2 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+70d1f033d63613b07206e7c357c3a191f1ba3e641b79e65de2933f2ee2ef455f ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'scope_end', 'sub']
+71fb1796cabcb9a6bb7efe4d614e8e1c0c13ea4c329f4b50c9857492f47c411d ['add', 'and', 'eq', 'lt', 'mod', 'mul', 'neq', 'not', 'or', 'ret', 'sub']
+748562647d74f3397e621955aada22861bd0c6e8780e1522f4f950f4ab5779b5 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+76aeb386ef04f1dc2cb12bce822ac7795670b2d939b016a4571e6ad59cc1f566 ['add', 'and', 'cond', 'cond_reexec', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+7a4dcc3143e583c9119b758b4a300740f0d01fd060ec8fa7e6b5de98086faffe ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+8264d4915f117c59684eec8a01dafccda78e5900c9b94d88d724551b32e47f56 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_set']
+834b354b74c1dda1f78991d42d970be38bc68316599f0f20c8e0c04643d36df6 ['add', 'and', 'div', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+8600f50e69a6a2a1e99819c8b4d5744e0ae237816eab404de659faca8faacf8d ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_read', 'var_read_payload']
+8768be2a2a6404cb3d85dbc5eaabd3e797b675448652ff246e672474ddebde6d ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'scope_start', 'sub']
+924506cdb8254308ae5bcc5ae613f79cf888203a293a222ff076951a9799eaf5 ['add', 'and', 'eq', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+95b25fc1b8ef6ebf50b372d63adf4c946867f9cf9f75e8309b47864632cfee13 ['add', 'and', 'cond', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+99a99b5595bf15e3bd683b5fb820f5725d775b4bac59623e28b41c9d71f0e2d4 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+99efe677242923ab7d2716ba5dbe84ecea78074224909a9674bc0778569eeebb ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'scope_start', 'sub']
+9a7b84a6b83f261bf0782da6ffe64eca62e5b93f8375219dd02bc64f8fb3422b ['add', 'and', 'cond', 'cond_payload', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+9e7fcc1c4b112632fc9c770f0cfd09abae30fb635433ca911bd7720d4e32aacf ['add', 'and', 'cond', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+9ee9b4c5b2223f2c4d31261f7d4e4bdfdbacc514ce11626f93be45e015084ada ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_write']
+9f81e7539f5b311e986b9abf6941d854f650a56333c2c18af6c0b027a870ffaf ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_read']
+a07a06c56b47dfe5f2ff5f70b3a0df950f7a944aacda254c15f2161dbc04c306 ['add', 'and', 'halt', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+a535aa0484dafbcfdea24368df339eb204509a8a7bff6ad5548d3c36846005f8 ['add', 'and', 'cond', 'cond_reexec', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+a5fd3e5a13997f98a89fcbc37a2b8193cbe69fabcd71b5fb699246e183b6b7c8 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+a60517f1aedf4c54bd65fe5b5d68f78ccae020797b67ac394c4e5d4438672365 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+acc936668ab9783ffd906dd8c2418de71350aba931558576e69093d5cc5dd1cd ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_read', 'var_read_payload']
+b222d4dbfb0d4691ca506676b28d82b46ca1dbed621a5ad97d163a65ff6fc1d3 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_read', 'var_read_payload']
+b42ba07a0c86538869bd7561e6422cd207daae7e4df66ebb836c578b23ceee4d ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'scope_end', 'sub']
+b51995f01bd856ccdafa419af3f8f91440ce39679ff72e80a79b18e9b2baf073 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_set', 'var_set_payload']
+b83b7553664740a0104e5cf3a0c98ff7da8fd9998578b8a20681584a759e514a ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_set']
+badbcbafda3932250a7c9dceb9de2b65f5a368a43fa7e1c46d4b349504421887 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+bcccbb2a55d6b5827d779d8bc80231a2b2d23ae2a9f5da91806baca8771b1743 ['add', 'and', 'div', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+bf7f1e7fbd6de7f49e3233f76f013d67f83de5f42b238483e221b8e11ad84043 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+c62e365ab24c77999d1f24bd76aa2758d6bf737e3ae39c05f9836f7fb1ffdac5 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+cd40e0a20f0aeae96f6d6e9ab24ea7676257d3492edf1d149bb005188bf908ee ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_read']
+d09c98b2165a8992a8940a5738550287a3297ac96b5ab9ff7bec43edb9627ceb ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+d21325c40346f4e000ec7ae6f448ab994ac15938bac0431aabe855bed24fe6a6 ['add', 'and', 'eq', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+d28e47be185580078938c89941707793e0c93a6278e81e009e6ac3374c22a5c0 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+d66e5b1e4f7be5d58d7d39294572c19829490161d28a7d1bb9feaaca6edd13ab ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+d7297850b282f6234cd21082aac5e6fc7cb8310e5dd9393b592571f2e77a6380 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_write']
+d7ccbf62b0758fa9814802dba146cde12738cea582d7d9a02122a9fddc611d80 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_set', 'var_set_payload']
+e54dfdbae4295595f0c1bfaccd60abec7aecd00fce87bc74c0b0db81361cfd7b ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub', 'var_write', 'var_write_payload']
+e5ae4f2d87900773662b7e3c55f2133297cbaa31b7b6edf9c6957a2c1efe659a ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+ed6c89f285f4bb6536944427e2deffe8ba21f7082496c01e487c105af8b9e641 ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+f558259802aafb2e8240dd3019e7c009c15eadfadca8b8ad44f0b60439e0f395 ['add', 'and', 'gt', 'lt', 'mod', 'mul', 'not', 'or', 'ret', 'sub']
+f7da1b3ca5a429a4b3b82ad031a301e9d15240bf3fd6da82fff84c0ef459eb8c ['add', 'and', 'lt', 'mod', 'mul', 'not', 'or', 'reexec', 'ret', 'sub']
+
+```
+
+## assistant
+
+还有一个结构风险：`mods` 里有很多 hash dll，可能是多轮构建遗留，不一定每个都是当前源码的 hash。我会用当前源码和当前静态库临时复编，按 dll 内容算出“当前有效 token”，这样首块会和本地 `find()` 的规则一致。
+
+### tool python call_ISxAuWdqtJ4ejd9bgjmrXlmg
+
+```
+import subprocess, os, tempfile, hashlib, shutil
+from pathlib import Path
+base=Path(r'C:\Users\12159\Desktop\Singularity')
+print('gcc:', shutil.which('gcc'))
+print('g++:', shutil.which('g++'))
+# read dxgfx h/cpp relevant exports
+for p in [base/'dxgfx.h', base/'dxgfx.cpp']:
+    print('\n##', p.name)
+    txt=p.read_text(encoding='utf-8', errors='ignore').splitlines()
+    for i,line in enumerate(txt,1):
+        if 'dxgfx_' in line or i<80 and p.name=='dxgfx.h':
+            print(f'{i:04d}: {line}')
+
+```
+
+## tool call_ISxAuWdqtJ4ejd9bgjmrXlmg
+
+```text
+gcc: C:\mingw64\bin\gcc.EXE
+g++: C:\mingw64\bin\g++.EXE
+
+## dxgfx.h
+0001: #ifndef DXGFX_H
+0002: #define DXGFX_H
+0003: 
+0004: #ifdef __cplusplus
+0005: extern "C" {
+0006: #endif
+0007: 
+0008: #ifdef DXGFX_BUILD
+0009: #define DXGFX_API __declspec(dllexport)
+0010: #else
+0011: #define DXGFX_API __declspec(dllimport)
+0012: #endif
+0013: 
+0014: typedef unsigned char dx_u8;
+0015: typedef unsigned int dx_u32;
+0016: 
+0017: DXGFX_API int dxgfx_keyboard(dx_u8 out_state[256]);
+0018: DXGFX_API int dxgfx_mouse(int out_state[4]);
+0019: DXGFX_API int dxgfx_draw_text(int x, int y, dx_u32 argb, float size, const char *utf8, dx_u32 len);
+0020: DXGFX_API int dxgfx_draw_rect(float x, float y, float w, float h, dx_u32 argb, float stroke, int fill);
+0021: DXGFX_API int dxgfx_draw_line(float x1, float y1, float x2, float y2, dx_u32 argb, float stroke);
+0022: 
+0023: #ifdef __cplusplus
+0024: }
+0025: #endif
+0026: #endif
+
+## dxgfx.cpp
+0019: static LRESULT CALLBACK dxgfx_wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
+0025: static void dxgfx_pump(void) {
+0033: static D2D1_COLOR_F dxgfx_color(dx_u32 c) {
+0042: static int dxgfx_init(void) {
+0043:     if (g_inited) { dxgfx_pump(); return g_rt != 0; }
+0050:     wc.lpfnWndProc = dxgfx_wndproc;
+0075:     if (FAILED(g_rt->CreateSolidColorBrush(dxgfx_color(0xffffffff), &g_brush))) return 0;
+0078:     dxgfx_pump();
+0082: static int dxgfx_begin(dx_u32 argb) {
+0083:     if (!dxgfx_init()) return 0;
+0085:     dxgfx_pump();
+0087:     g_brush->SetColor(dxgfx_color(argb));
+0091: static int dxgfx_end(void) {
+0093:     dxgfx_pump();
+0097: extern "C" DXGFX_API int dxgfx_keyboard(dx_u8 out_state[256]) {
+0099:     dxgfx_pump();
+0108: extern "C" DXGFX_API int dxgfx_mouse(int out_state[4]) {
+0110:     dxgfx_pump();
+0124: extern "C" DXGFX_API int dxgfx_draw_text(int x, int y, dx_u32 argb, float size, const char *utf8, dx_u32 len) {
+0127:     if (!dxgfx_begin(argb)) return 0;
+0130:     if (wlen <= 0) { dxgfx_end(); return 0; }
+0132:     if (!ws) { dxgfx_end(); return 0; }
+0147:     return dxgfx_end();
+0150: extern "C" DXGFX_API int dxgfx_draw_rect(float x, float y, float w, float h, dx_u32 argb, float stroke, int fill) {
+0152:     if (!dxgfx_begin(argb)) return 0;
+0156:     return dxgfx_end();
+0159: extern "C" DXGFX_API int dxgfx_draw_line(float x1, float y1, float x2, float y2, dx_u32 argb, float stroke) {
+0161:     if (!dxgfx_begin(argb)) return 0;
+0163:     return dxgfx_end();
+
+```
+
+## assistant
+
+`dxgfx` 现有绘图函数每次调用都会独立 begin/end，一帧组合绘制可能会互相覆盖。我要看一下实现细节，判断用现有 mod 能不能做一个持续首屏，还是必须先确认新增/调整图形帧控制。
+
+### tool python call_zvBekTcy9jRJ0nP0RvFLiHYm
+
+```
+from pathlib import Path
+p=Path(r'C:\Users\12159\Desktop\Singularity\dxgfx.cpp')
+lines=p.read_text(encoding='utf-8',errors='ignore').splitlines()
+for i in range(80,170):
+    print(f'{i+1:04d}: {lines[i]}')
+
+```
+
+## tool call_zvBekTcy9jRJ0nP0RvFLiHYm
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 5, in <module>
+    print(f'{i+1:04d}: {lines[i]}')
+                        ~~~~~^^^
+IndexError: list index out of range
+0081: 
+0082: static int dxgfx_begin(dx_u32 argb) {
+0083:     if (!dxgfx_init()) return 0;
+0084:     if (!IsWindowVisible(g_hwnd)) ShowWindow(g_hwnd, SW_SHOW);
+0085:     dxgfx_pump();
+0086:     g_rt->BeginDraw();
+0087:     g_brush->SetColor(dxgfx_color(argb));
+0088:     return 1;
+0089: }
+0090: 
+0091: static int dxgfx_end(void) {
+0092:     HRESULT hr = g_rt->EndDraw();
+0093:     dxgfx_pump();
+0094:     return SUCCEEDED(hr);
+0095: }
+0096: 
+0097: extern "C" DXGFX_API int dxgfx_keyboard(dx_u8 out_state[256]) {
+0098:     if (!out_state) return 0;
+0099:     dxgfx_pump();
+0100:     for (int i = 0; i < 256; i++) {
+0101:         SHORT a = GetAsyncKeyState(i);
+0102:         SHORT k = GetKeyState(i);
+0103:         out_state[i] = (dx_u8)(((a & 0x8000) ? 0x80 : 0) | ((k & 1) ? 0x01 : 0));
+0104:     }
+0105:     return 1;
+0106: }
+0107: 
+0108: extern "C" DXGFX_API int dxgfx_mouse(int out_state[4]) {
+0109:     if (!out_state) return 0;
+0110:     dxgfx_pump();
+0111:     POINT p;
+0112:     GetCursorPos(&p);
+0113:     out_state[0] = (int)p.x;
+0114:     out_state[1] = (int)p.y;
+0115:     out_state[2] = ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0) |
+0116:                    ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) ? 2 : 0) |
+0117:                    ((GetAsyncKeyState(VK_MBUTTON) & 0x8000) ? 4 : 0) |
+0118:                    ((GetAsyncKeyState(VK_XBUTTON1) & 0x8000) ? 8 : 0) |
+0119:                    ((GetAsyncKeyState(VK_XBUTTON2) & 0x8000) ? 16 : 0);
+0120:     out_state[3] = 0;
+0121:     return 1;
+0122: }
+0123: 
+0124: extern "C" DXGFX_API int dxgfx_draw_text(int x, int y, dx_u32 argb, float size, const char *utf8, dx_u32 len) {
+0125:     if (!utf8) return 0;
+0126:     if (size <= 0.0f) size = 20.0f;
+0127:     if (!dxgfx_begin(argb)) return 0;
+0128: 
+0129:     int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, 0, 0);
+0130:     if (wlen <= 0) { dxgfx_end(); return 0; }
+0131:     wchar_t *ws = (wchar_t*)malloc((wlen + 1) * sizeof(wchar_t));
+0132:     if (!ws) { dxgfx_end(); return 0; }
+0133:     MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, ws, wlen);
+0134:     ws[wlen] = 0;
+0135: 
+0136:     IDWriteTextFormat *fmt = 0;
+0137:     HRESULT hr = g_dw->CreateTextFormat(L"Segoe UI", 0, DWRITE_FONT_WEIGHT_NORMAL,
+0138:                                         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+0139:                                         size, L"", &fmt);
+0140:     if (SUCCEEDED(hr)) {
+0141:         D2D1_SIZE_F s = g_rt->GetSize();
+0142:         D2D1_RECT_F r = D2D1::RectF((FLOAT)x, (FLOAT)y, s.width, s.height);
+0143:         g_rt->DrawText(ws, (UINT32)wlen, fmt, r, g_brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+0144:         fmt->Release();
+0145:     }
+0146:     free(ws);
+0147:     return dxgfx_end();
+0148: }
+0149: 
+0150: extern "C" DXGFX_API int dxgfx_draw_rect(float x, float y, float w, float h, dx_u32 argb, float stroke, int fill) {
+0151:     if (stroke <= 0.0f) stroke = 1.0f;
+0152:     if (!dxgfx_begin(argb)) return 0;
+0153:     D2D1_RECT_F r = D2D1::RectF(x, y, x + w, y + h);
+0154:     if (fill) g_rt->FillRectangle(r, g_brush);
+0155:     else g_rt->DrawRectangle(r, g_brush, stroke);
+0156:     return dxgfx_end();
+0157: }
+0158: 
+0159: extern "C" DXGFX_API int dxgfx_draw_line(float x1, float y1, float x2, float y2, dx_u32 argb, float stroke) {
+0160:     if (stroke <= 0.0f) stroke = 1.0f;
+0161:     if (!dxgfx_begin(argb)) return 0;
+0162:     g_rt->DrawLine(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2), g_brush, stroke);
+0163:     return dxgfx_end();
+0164: }
+
+```
+
+## assistant
+
+我这边发现一个需要先卡住确认的架构矛盾：你说首运行入口是“全零 hash 的 firstchild 文件 block”，但当前 `vm.c` 的 `boot()->walk()` 并不会下载 block，它只沿着 `firstchild` 一直找本地 `mods/<hash>.dll`。如果全零 firstchild 是文件 block 的 hash，现有 `vm.c` 会继续请求这个 block hash 的 firstchild，而不是进入 `vmexec.c` 的 block 解析流程。这里有一个必须先确认的不兼容点，否则首运行 block 写出来也不会被当前 `vm.c` 执行。
+
+当前 `vm.c` 的启动逻辑是：
+
+```c
+memset(cur, 0, 32);
+walk();
+```
+
+而 `walk()` 做的是：
+
+```c
+while (!(f = find(cur))) {
+    H n;
+    cvm_firstchild(cur, n);
+    memcpy(cur, n, 32);
+}
+imp = f;
+```
+
+也就是说：它从全零 hash 开始，不断取 `firstchild`，直到找到一个本地 `mods/<hash>.dll`。它没有调用 `cvm_exec()`，也没有下载文件 block，更没有初始化 `vmstate.ptr/current_base`。
+
+所以如果你确认“全零 hash 的 firstchild 是文件 block”，当前 `vm.c` 会这样走：
+
+1. `cur = 0000...`
+2. `find(cur)` 找不到本地 mod
+3. 请求 `firstchild(0000...)`，得到文件 block 的 hash
+4. `cur = block_hash`
+5. `find(block_hash)` 仍然找不到本地 mod
+6. 请求 `firstchild(block_hash)`
+7. 继续沿图走，直到找到某个 mod
+8. 直接执行这个 mod，但此时没有当前 block，`ptr` 也没有指向 block 内容
+
+这和新版 block 执行模型冲突。
+
+因此这里需要你确认一个设计点：
+
+**全零 hash 的 firstchild 到底应该是什么？**
+
+A. 真的是“文件 block 的 hash”。  
+那就需要某处在启动阶段调用 `cvm_exec(0000...)` 或等价逻辑来下载并进入 block。但这通常要改 `vm.c`，而你说 `vm.c` 不变。
+
+B. 是一个本地 mod 的 hash。  
+那当前 `vm.c` 可以执行它，但这不是“由现有 mod 组成的 block”，而是直接启动某个 mod，而且没有 payload。
+
+C. 是一条图路径：`0000... -> block_key -> first_token_mod -> ...`。  
+这能满足 `walk()` 找到 mod，但还是不会加载 block 内容，所以无法按你给的 block 格式执行。
+
+在 `vm.c` 不改的前提下，**“全零 firstchild 是文件 block，并由 VM 首次下载运行”这件事目前做不到**。可以改 `vmexec.c/vmstore.c/vmstate.c`，但它们在 `boot()->walk()` 之前没有被调用，解决不了入口问题。
+
+我建议你确认是否允许把 `vm.c` 的启动入口从 `walk()` 改成调用 `cvm_exec(zero)`；如果仍然坚持 `vm.c` 不变，那需要重新定义首运行入口不是文件 block，而是当前 `walk()` 能找到的本地 mod。
+
+## user
+
+vm.c有bug
+
+应该是
+```伪代码
+currenthash = 32zerohash
+while{
+    currenthash = *(H*)download(getfirstchild(checkmod(currenthash)))
+}
+···
+
+最小改动,完全忽略错误崩溃处理
