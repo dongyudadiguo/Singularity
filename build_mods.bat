@@ -5,6 +5,21 @@ call build_cont.bat
 call build_vmstack.bat
 call build_vmvar.bat
 gcc -shared mods_src/add.c -o mods/add.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/ret.c -o mods/ret.dll libcont.a libvmstate.a
+gcc -shared mods_src/halt.c -o mods/halt.dll
+gcc -shared mods_src/sub.c -o mods/sub.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mul.c -o mods/mul.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/div.c -o mods/div.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mod.c -o mods/mod.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/eq.c -o mods/eq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/neq.c -o mods/neq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gt.c -o mods/gt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lt.c -o mods/lt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gte.c -o mods/gte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lte.c -o mods/lte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/and.c -o mods/and.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/or.c -o mods/or.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/not.c -o mods/not.dll libcont.a libvmstack.a libvmstate.a
 gcc -shared mods_src/cond.c -o mods/cond.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
 gcc -shared mods_src/cond_payload.c -o mods/cond_payload.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
 gcc -shared mods_src/reexec.c -o mods/reexec.dll libvmexec.a libvmstate.a libvm.a

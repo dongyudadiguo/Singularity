@@ -1061,3 +1061,1014 @@ cvm_advance 取块内第一个 token 并跳过其 payload；
 ```
 
 所以：**整体逻辑基本就是你说的那种情况；只是 `cont` 本身只负责取 token、移动 ptr、调用 `cvm_exec`，后面的缓存、用户覆盖、getfirstchild、进入块循环逻辑在 `cvm_exec` / `vmstore.c` / `vmstate.c` 中完成。**
+
+## user
+
+需要记录返回点。
+
+
+然后制作以下指令：
+
+ret - 结束当前块的执行返回到进入该块的下一个位置继续
+halt - 停机，退出虚拟机循环。
+add, sub, mul, div, mod - 整数四则运算（弹出两个操作数，压入结果）。
+eq, neq, gt, lt, gte, lte - 比较运算，结果为布尔值压栈。
+and, or, not - 逻辑运算。
+
+## assistant
+
+### tool python call_jmYYgDm0nxCdL9Ws8FMlLRWO
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+print((root/'build_mods.bat').read_text(errors='ignore'))
+for p in (root/'mods_src').glob('*.c'):
+ print('\n---',p.name)
+ print(p.read_text(errors='ignore')[:4000])
+```
+
+## tool call_jmYYgDm0nxCdL9Ws8FMlLRWO
+
+```text
+@echo off
+setlocal enabledelayedexpansion
+
+call build_cont.bat
+call build_vmstack.bat
+call build_vmvar.bat
+gcc -shared mods_src/add.c -o mods/add.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/cond.c -o mods/cond.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/cond_payload.c -o mods/cond_payload.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/reexec.c -o mods/reexec.dll libvmexec.a libvmstate.a libvm.a
+gcc -shared mods_src/cond_reexec.c -o mods/cond_reexec.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/var_read.c -o mods/var_read.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_read_payload.c -o mods/var_read_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_write.c -o mods/var_write.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_write_payload.c -o mods/var_write_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_set.c -o mods/var_set.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_set_payload.c -o mods/var_set_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/scope_start.c -o mods/scope_start.dll libcont.a libvmvar.a libvmstate.a
+gcc -shared mods_src/scope_end.c -o mods/scope_end.dll libcont.a libvmvar.a libvmstate.a
+
+echo.
+echo === 閲嶅懡鍚 DLL 涓 SHA-256 鍝堝笇鍚 ===
+for %%f in (mods\*.dll) do call :hash_rename "%%f"
+echo === 瀹屾垚 ===
+goto :eof
+
+:hash_rename
+for /f "skip=1 delims=" %%h in ('certutil -hashfile "%~1" SHA256') do set "hash=%%h" & goto :got_hash
+:got_hash
+set "hash=!hash: =!"
+if /i not "%%~nx1"=="!hash!.dll" (
+    if not exist "mods\!hash!.dll" (
+        ren "%~1" "!hash!.dll"
+        echo %%~nx1 -^> !hash!.dll
+    ) else (
+        echo 璀﹀憡: !hash!.dll 宸插瓨鍦锛岃烦杩 %%~nx1
+    )
+) else (
+    echo 璺宠繃 %%~nx1 (宸叉槸鍝堝笇鍚峖)
+)
+goto :eof
+
+--- add.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    u32 b = *(u32*)pop(4);
+    u32 a = *(u32*)pop(4);
+    u32 r = a + b;
+    push(&r, 4);
+    cont();
+}
+
+
+--- cond.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H h;
+    int ok = mod_bool(pop(4));
+    u8 *p = pop(32);
+    for (u32 i = 0; i < 32; i++) h[i] = p[i];
+    if (ok) cvm_exec(h);
+    else cont();
+}
+
+
+--- cond_payload.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H h;
+    int ok = mod_bool(pop(4));
+    u8 *p = cvm_payload();
+    if (cvm_payload_size() < 32) { cont(); return; }
+    for (u32 i = 0; i < 32; i++) h[i] = p[i];
+    if (ok) cvm_exec_payload(h);
+    else cont();
+}
+
+
+--- cond_reexec.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    if (mod_bool(pop(4))) cvm_reexec();
+    else cont();
+}
+
+
+--- reexec.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    cvm_reexec();
+}
+
+
+--- scope_end.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    cvm_scope_end();
+    cont();
+}
+
+--- scope_start.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    cvm_scope_start();
+    cont();
+}
+
+--- var_read.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H id;
+    u8 *p = pop(32);
+    for (u32 i = 0; i < 32; i++) id[i] = p[i];
+    u32 size;
+    u8 *data = cvm_var_get(id, &size);
+    if (data) push(data, size);
+    cont();
+}
+
+
+--- var_read_payload.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H id;
+    u8 *p = cvm_payload();
+    if (cvm_payload_size() < 32) { cont(); return; }
+    for (u32 i = 0; i < 32; i++) id[i] = p[i];
+    u32 size;
+    u8 *data = cvm_var_get(id, &size);
+    if (data) push(data, size);
+    cont();
+}
+
+--- var_set.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H id;
+    u8 *p = pop(32);
+    for (u32 i = 0; i < 32; i++) id[i] = p[i];
+    u32 size = *(u32*)pop(4);
+    cvm_var_set(id, size);
+    cont();
+}
+
+
+--- var_set_payload.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H id;
+    u8 *p = cvm_payload();
+    if (cvm_payload_size() < 36) { cont(); return; }
+    for (u32 i = 0; i < 32; i++) id[i] = p[i];
+    u32 size = *(u32*)(p + 32);
+    cvm_var_set(id, size);
+    cont();
+}
+
+--- var_write.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H id;
+    u8 *p = pop(32);
+    for (u32 i = 0; i < 32; i++) id[i] = p[i];
+    u32 vsize;
+    if (!cvm_var_get(id, &vsize)) { cont(); return; }
+    u8 *data = pop(vsize);
+    cvm_var_write(id, data, vsize);
+    cont();
+}
+
+
+--- var_write_payload.c
+#include "mod.h"
+
+__declspec(dllexport) void run(void) {
+    H id;
+    u8 *p = cvm_payload();
+    if (cvm_payload_size() < 32) { cont(); return; }
+    for (u32 i = 0; i < 32; i++) id[i] = p[i];
+    u32 vsize;
+    if (!cvm_var_get(id, &vsize)) { cont(); return; }
+    u8 *data = pop(vsize);
+    cvm_var_write(id, data, vsize);
+    cont();
+}
+
+
+```
+
+## assistant
+
+### tool python call_cGWoZweBqpnB35vLlHwE6xNe
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+for p in root.glob('build_*.bat'):
+ if p.name in ['build_vmstate.bat','build_vm.bat','build_vmexec.bat']:
+  print('---',p.name); print(p.read_text(errors='ignore'))
+```
+
+## tool call_cGWoZweBqpnB35vLlHwE6xNe
+
+```text
+--- build_vm.bat
+gcc vm.c -o vm.exe -Wl,--out-implib,libvm.a -lws2_32
+--- build_vmexec.bat
+@echo off
+call build_vm.bat
+call build_vmstate.bat
+call build_vmstore.bat
+gcc -shared vmexec.c -o vmexec.dll libvm.a libvmstate.a libvmstore.a -Wl,--out-implib,libvmexec.a
+
+--- build_vmstate.bat
+@echo off
+gcc -shared vmstate.c -o vmstate.dll -Wl,--out-implib,libvmstate.a
+
+
+```
+
+## assistant
+
+### tool python call_eenow3UUfYg7JhWiLHt76feo
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+# update vmstate.c
+p=root/'vmstate.c'
+text=p.read_text(encoding='utf-8',errors='ignore')
+text=text.replace('static u8 *cur_base;\nstatic H cur_key;','static u8 *cur_base;\nstatic H cur_key;\n\ntypedef struct Frame {\n    u8 *base;\n    u8 *ret;\n    H key;\n} Frame;\n\nstatic Frame frames[1024];\nstatic u32 frame_sp;')
+text=text.replace('__declspec(dllexport) void cvm_set_current(const H k, u8 *base) {\n    if (k) memcpy(cur_key, k, 32);\n    cur_base = base;\n    ptr = base;\n}\n', '''__declspec(dllexport) void cvm_set_current(const H k, u8 *base) {\n    /*\n     * Entering a resolved block replaces the current instruction stream.\n     * Save the caller state first; ptr already points at the instruction after\n     * the token that entered this block, so it is the return point for ret.\n     */\n    if (cur_base && frame_sp < (u32)(sizeof(frames) / sizeof(frames[0]))) {\n        frames[frame_sp].base = cur_base;\n        frames[frame_sp].ret = ptr;\n        memcpy(frames[frame_sp].key, cur_key, 32);\n        frame_sp++;\n    }\n    if (k) memcpy(cur_key, k, 32);\n    cur_base = base;\n    ptr = base;\n}\n\n__declspec(dllexport) int cvm_ret(void) {\n    if (!frame_sp) return 0;\n    frame_sp--;\n    cur_base = frames[frame_sp].base;\n    ptr = frames[frame_sp].ret;\n    memcpy(cur_key, frames[frame_sp].key, 32);\n    return 1;\n}\n''')
+p.write_text(text,encoding='utf-8')
+print(p.read_text(encoding='utf-8'))
+```
+
+## tool call_eenow3UUfYg7JhWiLHt76feo
+
+```text
+#include <windows.h>
+#include <string.h>
+
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+__declspec(dllexport) u8 *ptr;
+static u8 *cur_base;
+static H cur_key;
+
+typedef struct Frame {
+    u8 *base;
+    u8 *ret;
+    H key;
+} Frame;
+
+static Frame frames[1024];
+static u32 frame_sp;
+
+__declspec(dllexport) u8 *cvm_token(void) { return ptr; }
+__declspec(dllexport) u8 *cvm_payload(void) { return ptr + 36; }
+__declspec(dllexport) u32 cvm_payload_size(void) { return *(u32*)(ptr + 32); }
+__declspec(dllexport) u8 *cvm_current_base(void) { return cur_base; }
+__declspec(dllexport) u8 *cvm_current_key(void) { return cur_key; }
+
+__declspec(dllexport) void cvm_set_current(const H k, u8 *base) {
+    /*
+     * Entering a resolved block replaces the current instruction stream.
+     * Save the caller state first; ptr already points at the instruction after
+     * the token that entered this block, so it is the return point for ret.
+     */
+    if (cur_base && frame_sp < (u32)(sizeof(frames) / sizeof(frames[0]))) {
+        frames[frame_sp].base = cur_base;
+        frames[frame_sp].ret = ptr;
+        memcpy(frames[frame_sp].key, cur_key, 32);
+        frame_sp++;
+    }
+    if (k) memcpy(cur_key, k, 32);
+    cur_base = base;
+    ptr = base;
+}
+
+__declspec(dllexport) int cvm_ret(void) {
+    if (!frame_sp) return 0;
+    frame_sp--;
+    cur_base = frames[frame_sp].base;
+    ptr = frames[frame_sp].ret;
+    memcpy(cur_key, frames[frame_sp].key, 32);
+    return 1;
+}
+
+__declspec(dllexport) void cvm_advance(H next) {
+    memcpy(next, ptr, 32);
+    ptr += 32 + 4 + *(u32*)(ptr + 32);
+}
+
+
+```
+
+## assistant
+
+### tool python call_RvV75JkyNqhANfjFSONgX1qL
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+p=root/'mods_src'/'mod.h'
+text=p.read_text(encoding='utf-8',errors='ignore')
+if 'int cvm_ret(void);' not in text:
+ text=text.replace('extern __declspec(dllimport) void cvm_reexec(void);', 'extern __declspec(dllimport) void cvm_reexec(void);\nextern __declspec(dllimport) int cvm_ret(void);')
+p.write_text(text,encoding='utf-8')
+print(p.read_text(encoding='utf-8'))
+```
+
+## tool call_RvV75JkyNqhANfjFSONgX1qL
+
+```text
+#ifndef MOD_H
+#define MOD_H
+
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+extern __declspec(dllimport) u8 *ptr;
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void push(const void *p, u32 size);
+extern __declspec(dllimport) u8 *cvm_payload(void);
+extern __declspec(dllimport) u32 cvm_payload_size(void);
+extern __declspec(dllimport) u8 *cvm_token(void);
+extern __declspec(dllimport) void cvm_exec(const H h);
+extern __declspec(dllimport) void cvm_exec_payload(H h);
+extern __declspec(dllimport) void cvm_reexec(void);
+extern __declspec(dllimport) int cvm_ret(void);
+extern __declspec(dllimport) void cvm_scope_start(void);
+extern __declspec(dllimport) void cvm_scope_end(void);
+extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);
+extern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 size);
+extern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);
+
+static int mod_bool(const void *p) {
+    const u8 *b = (const u8*)p;
+    for (u32 i = 0; i < 4; i++) if (b[i]) return 1;
+    return 0;
+}
+
+#endif
+
+
+```
+
+## assistant
+
+### tool python call_MyLQa6BDVP0kFBEEjCM9T8Uu
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+mods=root/'mods_src'
+files={
+'ret.c': '''#include "mod.h"\n\n__declspec(dllexport) void run(void) {\n    if (cvm_ret()) cont();\n}\n''',
+'halt.c': '''#include <stdlib.h>\n#include "mod.h"\n\n__declspec(dllexport) void run(void) {\n    exit(0);\n}\n'''
+}
+# arithmetic
+ops={'sub':'a - b','mul':'a * b','div':'b ? a / b : 0','mod':'b ? a % b : 0'}
+for name,expr in ops.items():
+ files[f'{name}.c']=f'''#include "mod.h"\n\n__declspec(dllexport) void run(void) {{\n    u32 b = *(u32*)pop(4);\n    u32 a = *(u32*)pop(4);\n    u32 r = {expr};\n    push(&r, 4);\n    cont();\n}}\n'''
+# comparisons signed? use int? integers; choose signed int for gt etc? eq no matter. Need typedef absent. use int.
+cmps={'eq':'a == b','neq':'a != b','gt':'a > b','lt':'a < b','gte':'a >= b','lte':'a <= b'}
+for name,expr in cmps.items():
+ files[f'{name}.c']=f'''#include "mod.h"\n\n__declspec(dllexport) void run(void) {{\n    int b = *(int*)pop(4);\n    int a = *(int*)pop(4);\n    u32 r = ({expr}) ? 1 : 0;\n    push(&r, 4);\n    cont();\n}}\n'''
+# logical
+files['and.c']='''#include "mod.h"\n\n__declspec(dllexport) void run(void) {\n    int b = mod_bool(pop(4));\n    int a = mod_bool(pop(4));\n    u32 r = (a && b) ? 1 : 0;\n    push(&r, 4);\n    cont();\n}\n'''
+files['or.c']='''#include "mod.h"\n\n__declspec(dllexport) void run(void) {\n    int b = mod_bool(pop(4));\n    int a = mod_bool(pop(4));\n    u32 r = (a || b) ? 1 : 0;\n    push(&r, 4);\n    cont();\n}\n'''
+files['not.c']='''#include "mod.h"\n\n__declspec(dllexport) void run(void) {\n    int a = mod_bool(pop(4));\n    u32 r = (!a) ? 1 : 0;\n    push(&r, 4);\n    cont();\n}\n'''
+for fn,txt in files.items():
+ (mods/fn).write_text(txt,encoding='utf-8')
+print('wrote', len(files), 'files')
+print('\n'.join(sorted(files)))
+```
+
+## tool call_MyLQa6BDVP0kFBEEjCM9T8Uu
+
+```text
+wrote 15 files
+and.c
+div.c
+eq.c
+gt.c
+gte.c
+halt.c
+lt.c
+lte.c
+mod.c
+mul.c
+neq.c
+not.c
+or.c
+ret.c
+sub.c
+
+```
+
+## assistant
+
+### tool python call_DTHSKvhA1YJpqjavAlK4ETgZ
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+p=root/'build_mods.bat'
+text=p.read_text(encoding='utf-8',errors='ignore')
+# insert after add compile if not exists
+if 'mods_src/ret.c' not in text:
+ lines=text.splitlines()
+ out=[]
+ inserted=False
+ compile_lines=[
+'gcc -shared mods_src/ret.c -o mods/ret.dll libcont.a libvmstate.a',
+'gcc -shared mods_src/halt.c -o mods/halt.dll',
+'gcc -shared mods_src/sub.c -o mods/sub.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/mul.c -o mods/mul.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/div.c -o mods/div.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/mod.c -o mods/mod.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/eq.c -o mods/eq.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/neq.c -o mods/neq.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/gt.c -o mods/gt.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/lt.c -o mods/lt.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/gte.c -o mods/gte.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/lte.c -o mods/lte.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/and.c -o mods/and.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/or.c -o mods/or.dll libcont.a libvmstack.a libvmstate.a',
+'gcc -shared mods_src/not.c -o mods/not.dll libcont.a libvmstack.a libvmstate.a',
+]
+ for line in lines:
+  out.append(line)
+  if not inserted and 'mods_src/add.c' in line:
+   out.extend(compile_lines)
+   inserted=True
+ text='\n'.join(out)+'\n'
+p.write_text(text,encoding='utf-8')
+print(p.read_text(encoding='utf-8',errors='ignore'))
+```
+
+## tool call_DTHSKvhA1YJpqjavAlK4ETgZ
+
+```text
+@echo off
+setlocal enabledelayedexpansion
+
+call build_cont.bat
+call build_vmstack.bat
+call build_vmvar.bat
+gcc -shared mods_src/add.c -o mods/add.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/ret.c -o mods/ret.dll libcont.a libvmstate.a
+gcc -shared mods_src/halt.c -o mods/halt.dll
+gcc -shared mods_src/sub.c -o mods/sub.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mul.c -o mods/mul.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/div.c -o mods/div.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mod.c -o mods/mod.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/eq.c -o mods/eq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/neq.c -o mods/neq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gt.c -o mods/gt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lt.c -o mods/lt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gte.c -o mods/gte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lte.c -o mods/lte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/and.c -o mods/and.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/or.c -o mods/or.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/not.c -o mods/not.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/cond.c -o mods/cond.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/cond_payload.c -o mods/cond_payload.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/reexec.c -o mods/reexec.dll libvmexec.a libvmstate.a libvm.a
+gcc -shared mods_src/cond_reexec.c -o mods/cond_reexec.dll libcont.a libvmstack.a libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32
+gcc -shared mods_src/var_read.c -o mods/var_read.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_read_payload.c -o mods/var_read_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_write.c -o mods/var_write.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_write_payload.c -o mods/var_write_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_set.c -o mods/var_set.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/var_set_payload.c -o mods/var_set_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
+gcc -shared mods_src/scope_start.c -o mods/scope_start.dll libcont.a libvmvar.a libvmstate.a
+gcc -shared mods_src/scope_end.c -o mods/scope_end.dll libcont.a libvmvar.a libvmstate.a
+
+echo.
+echo === 重命名 DLL 为 SHA-256 哈希名 ===
+for %%f in (mods\*.dll) do call :hash_rename "%%f"
+echo === 完成 ===
+goto :eof
+
+:hash_rename
+for /f "skip=1 delims=" %%h in ('certutil -hashfile "%~1" SHA256') do set "hash=%%h" & goto :got_hash
+:got_hash
+set "hash=!hash: =!"
+if /i not "%%~nx1"=="!hash!.dll" (
+    if not exist "mods\!hash!.dll" (
+        ren "%~1" "!hash!.dll"
+        echo %%~nx1 -^> !hash!.dll
+    ) else (
+        echo 警告: !hash!.dll 已存在，跳过 %%~nx1
+    )
+) else (
+    echo 跳过 %%~nx1 (已是哈希名^)
+)
+goto :eof
+
+
+```
+
+## assistant
+
+### tool python call_zxj0txTxooLwGwvnkTVt5r8P
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+for p in ['build_cont.bat','build_vmstack.bat','build_vmvar.bat']:
+ print('---',p); print((root/p).read_text(errors='ignore'))
+```
+
+## tool call_zxj0txTxooLwGwvnkTVt5r8P
+
+```text
+--- build_cont.bat
+@echo off
+call build_vmstate.bat
+call build_vmexec.bat
+gcc -shared cont.c -o cont.dll libvmstate.a libvmexec.a -Wl,--out-implib,libcont.a
+
+--- build_vmstack.bat
+@echo off
+call build_vmstate.bat
+gcc -shared vmstack.c -o vmstack.dll libvmstate.a -Wl,--out-implib,libvmstack.a
+
+--- build_vmvar.bat
+@echo off
+call build_vmstate.bat
+gcc -shared vmvar.c -o vmvar.dll libvmstate.a -Wl,--out-implib,libvmvar.a
+
+```
+
+## assistant
+
+### tool python call_gljkLhTK9oevVozyREtscjjZ
+
+```
+import subprocess, os, textwrap
+root=r'C:\Users\12159\Desktop\Singularity'
+# Try compile only new critical components? run build_mods.bat could rename dlls. Do it per user's task.
+proc=subprocess.run(['cmd','/c','build_mods.bat'],cwd=root,capture_output=True,text=True,timeout=120)
+print('return',proc.returncode)
+print('STDOUT:\n',proc.stdout[-4000:])
+print('STDERR:\n',proc.stderr[-4000:])
+```
+
+## tool call_gljkLhTK9oevVozyREtscjjZ
+
+```text
+Exception in thread Thread-1 (_readerthread):
+Traceback (most recent call last):
+  File "C:\Users\12159\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\12159\AppData\Local\Python\pythoncore-3.14-64\Lib\threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\12159\AppData\Local\Python\pythoncore-3.14-64\Lib\subprocess.py", line 1614, in _readerthread
+    buffer.append(fh.read())
+                  ~~~~~~~^^
+UnicodeDecodeError: 'gbk' codec can't decode byte 0xa8 in position 129: illegal multibyte sequence
+Traceback (most recent call last):
+  File "<string>", line 6, in <module>
+    print('STDOUT:\n',proc.stdout[-4000:])
+                      ~~~~~~~~~~~^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+return 0
+
+```
+
+## assistant
+
+### tool python call_p4cFjWbGVJhjbz0p9Srgo7W7
+
+```
+import subprocess, os
+root=r'C:\Users\12159\Desktop\Singularity'
+proc=subprocess.run(['cmd','/c','build_mods.bat'],cwd=root,capture_output=True,timeout=120)
+print('return',proc.returncode)
+print('STDOUT:\n',proc.stdout.decode('utf-8','replace')[-4000:])
+print('STDERR:\n',proc.stderr.decode('utf-8','replace')[-4000:])
+```
+
+## tool call_p4cFjWbGVJhjbz0p9Srgo7W7
+
+```text
+return 0
+STDOUT:
+ 7e6b5de98086faffe.dll 已存在，跳过 %~nx1
+
+警告: 834b354b74c1dda1f78991d42d970be38bc68316599f0f20c8e0c04643d36df6.dll 已存在，跳过 %~nx1
+
+警告: 8600f50e69a6a2a1e99819c8b4d5744e0ae237816eab404de659faca8faacf8d.dll 已存在，跳过 %~nx1
+
+警告: 8768be2a2a6404cb3d85dbc5eaabd3e797b675448652ff246e672474ddebde6d.dll 已存在，跳过 %~nx1
+
+警告: 95b25fc1b8ef6ebf50b372d63adf4c946867f9cf9f75e8309b47864632cfee13.dll 已存在，跳过 %~nx1
+
+警告: 9a7b84a6b83f261bf0782da6ffe64eca62e5b93f8375219dd02bc64f8fb3422b.dll 已存在，跳过 %~nx1
+
+警告: 9ee9b4c5b2223f2c4d31261f7d4e4bdfdbacc514ce11626f93be45e015084ada.dll 已存在，跳过 %~nx1
+
+警告: a535aa0484dafbcfdea24368df339eb204509a8a7bff6ad5548d3c36846005f8.dll 已存在，跳过 %~nx1
+
+警告: a60517f1aedf4c54bd65fe5b5d68f78ccae020797b67ac394c4e5d4438672365.dll 已存在，跳过 %~nx1
+
+警告: acc936668ab9783ffd906dd8c2418de71350aba931558576e69093d5cc5dd1cd.dll 已存在，跳过 %~nx1
+
+%~nx1 -> 4b4c870f342ef8616bd845d0573e9658cae0d4d21fbd030cfe52d99c39cd4be1.dll
+
+%~nx1 -> a5fd3e5a13997f98a89fcbc37a2b8193cbe69fabcd71b5fb699246e183b6b7c8.dll
+
+警告: b42ba07a0c86538869bd7561e6422cd207daae7e4df66ebb836c578b23ceee4d.dll 已存在，跳过 %~nx1
+
+警告: b51995f01bd856ccdafa419af3f8f91440ce39679ff72e80a79b18e9b2baf073.dll 已存在，跳过 %~nx1
+
+警告: b83b7553664740a0104e5cf3a0c98ff7da8fd9998578b8a20681584a759e514a.dll 已存在，跳过 %~nx1
+
+警告: c62e365ab24c77999d1f24bd76aa2758d6bf737e3ae39c05f9836f7fb1ffdac5.dll 已存在，跳过 %~nx1
+
+警告: cd40e0a20f0aeae96f6d6e9ab24ea7676257d3492edf1d149bb005188bf908ee.dll 已存在，跳过 %~nx1
+
+%~nx1 -> 9e7fcc1c4b112632fc9c770f0cfd09abae30fb635433ca911bd7720d4e32aacf.dll
+
+%~nx1 -> 55cdfc680750049a70d2bc6d0bdb162bf040e5d650854dcb49431d25c2b83197.dll
+
+%~nx1 -> 76aeb386ef04f1dc2cb12bce822ac7795670b2d939b016a4571e6ad59cc1f566.dll
+
+警告: d09c98b2165a8992a8940a5738550287a3297ac96b5ab9ff7bec43edb9627ceb.dll 已存在，跳过 %~nx1
+
+警告: d21325c40346f4e000ec7ae6f448ab994ac15938bac0431aabe855bed24fe6a6.dll 已存在，跳过 %~nx1
+
+警告: d66e5b1e4f7be5d58d7d39294572c19829490161d28a7d1bb9feaaca6edd13ab.dll 已存在，跳过 %~nx1
+
+警告: d7297850b282f6234cd21082aac5e6fc7cb8310e5dd9393b592571f2e77a6380.dll 已存在，跳过 %~nx1
+
+%~nx1 -> bcccbb2a55d6b5827d779d8bc80231a2b2d23ae2a9f5da91806baca8771b1743.dll
+
+警告: ed6c89f285f4bb6536944427e2deffe8ba21f7082496c01e487c105af8b9e641.dll 已存在，跳过 %~nx1
+
+%~nx1 -> 924506cdb8254308ae5bcc5ae613f79cf888203a293a222ff076951a9799eaf5.dll
+
+警告: f7da1b3ca5a429a4b3b82ad031a301e9d15240bf3fd6da82fff84c0ef459eb8c.dll 已存在，跳过 %~nx1
+
+%~nx1 -> f558259802aafb2e8240dd3019e7c009c15eadfadca8b8ad44f0b60439e0f395.dll
+
+%~nx1 -> 3f1b3b7f5f2e50d7244e87cff374f365d93abbe28c7097725297e899167308be.dll
+
+%~nx1 -> a07a06c56b47dfe5f2ff5f70b3a0df950f7a944aacda254c15f2161dbc04c306.dll
+
+%~nx1 -> 99a99b5595bf15e3bd683b5fb820f5725d775b4bac59623e28b41c9d71f0e2d4.dll
+
+%~nx1 -> 585a13fb0ba59f0d3db8d42fa0e9f640571bc7ef7c7cb3725401125496811a8f.dll
+
+%~nx1 -> d28e47be185580078938c89941707793e0c93a6278e81e009e6ac3374c22a5c0.dll
+
+%~nx1 -> 20232682597112b6b746bbe016a18bd7c3b551e85ddd8fca21c73713f7b69660.dll
+
+%~nx1 -> 71fb1796cabcb9a6bb7efe4d614e8e1c0c13ea4c329f4b50c9857492f47c411d.dll
+
+%~nx1 -> bf7f1e7fbd6de7f49e3233f76f013d67f83de5f42b238483e221b8e11ad84043.dll
+
+%~nx1 -> 6d6e24d525eceeb97aec755b36c7cff4b463b9b602623fd946eb22eb50358034.dll
+
+%~nx1 -> 31f73d721b7f6e5d5dd7ac7d4d47d363c4e03771785676ffc53258013c3a4adf.dll
+
+%~nx1 -> badbcbafda3932250a7c9dceb9de2b65f5a368a43fa7e1c46d4b349504421887.dll
+
+%~nx1 -> 70d1f033d63613b07206e7c357c3a191f1ba3e641b79e65de2933f2ee2ef455f.dll
+
+%~nx1 -> 99efe677242923ab7d2716ba5dbe84ecea78074224909a9674bc0778569eeebb.dll
+
+%~nx1 -> e5ae4f2d87900773662b7e3c55f2133297cbaa31b7b6edf9c6957a2c1efe659a.dll
+
+%~nx1 -> 9f81e7539f5b311e986b9abf6941d854f650a56333c2c18af6c0b027a870ffaf.dll
+
+%~nx1 -> b222d4dbfb0d4691ca506676b28d82b46ca1dbed621a5ad97d163a65ff6fc1d3.dll
+
+%~nx1 -> 8264d4915f117c59684eec8a01dafccda78e5900c9b94d88d724551b32e47f56.dll
+
+%~nx1 -> d7ccbf62b0758fa9814802dba146cde12738cea582d7d9a02122a9fddc611d80.dll
+
+%~nx1 -> 029bde7a43d4374f0ab0f7a0907692a67af8dc110252a72f5eefd7996787c0a5.dll
+
+%~nx1 -> e54dfdbae4295595f0c1bfaccd60abec7aecd00fce87bc74c0b0db81361cfd7b.dll
+
+=== 完成 ===
+
+
+STDERR:
+ 
+
+```
+
+## assistant
+
+已完成修改，并已运行 `build_mods.bat` 编译通过，返回码 `0`。
+
+## 已实现内容
+
+### 1. 增加块返回点记录
+
+修改了：
+
+```text
+vmstate.c
+```
+
+新增了调用帧栈：
+
+```c
+typedef struct Frame {
+    u8 *base;
+    u8 *ret;
+    H key;
+} Frame;
+
+static Frame frames[1024];
+static u32 frame_sp;
+```
+
+现在 `cvm_set_current()` 进入新块时，会保存当前块上下文：
+
+```c
+frames[frame_sp].base = cur_base;
+frames[frame_sp].ret = ptr;
+memcpy(frames[frame_sp].key, cur_key, 32);
+frame_sp++;
+```
+
+其中 `ptr` 在进入块前已经指向“调用该块的 token 后面的下一条指令”，所以它就是 `ret` 要返回的位置。
+
+新增导出函数：
+
+```c
+__declspec(dllexport) int cvm_ret(void)
+```
+
+用于恢复上一个块：
+
+```c
+cur_base = frames[frame_sp].base;
+ptr = frames[frame_sp].ret;
+memcpy(cur_key, frames[frame_sp].key, 32);
+```
+
+---
+
+### 2. 更新 `mod.h`
+
+修改了：
+
+```text
+mods_src/mod.h
+```
+
+新增声明：
+
+```c
+extern __declspec(dllimport) int cvm_ret(void);
+```
+
+---
+
+### 3. 新增指令源码
+
+已在：
+
+```text
+mods_src/
+```
+
+下新增这些文件：
+
+```text
+ret.c
+halt.c
+
+sub.c
+mul.c
+div.c
+mod.c
+
+eq.c
+neq.c
+gt.c
+lt.c
+gte.c
+lte.c
+
+and.c
+or.c
+not.c
+```
+
+原本已有：
+
+```text
+add.c
+```
+
+所以现在这些指令都具备了。
+
+---
+
+## 指令行为
+
+### `ret`
+
+```c
+__declspec(dllexport) void run(void) {
+    if (cvm_ret()) cont();
+}
+```
+
+作用：
+
+```text
+结束当前块，恢复到进入该块的下一条位置，然后继续执行。
+```
+
+如果没有返回帧，则不继续执行。
+
+---
+
+### `halt`
+
+```c
+__declspec(dllexport) void run(void) {
+    exit(0);
+}
+```
+
+作用：
+
+```text
+退出当前虚拟机进程。
+```
+
+---
+
+### 算术指令
+
+包括：
+
+```text
+add, sub, mul, div, mod
+```
+
+行为：
+
+```text
+弹出 b
+弹出 a
+计算 a op b
+压入结果
+cont()
+```
+
+其中 `div` 和 `mod` 对除零做了保护：
+
+```c
+u32 r = b ? a / b : 0;
+u32 r = b ? a % b : 0;
+```
+
+也就是说除零时结果压入 `0`。
+
+---
+
+### 比较指令
+
+包括：
+
+```text
+eq, neq, gt, lt, gte, lte
+```
+
+行为：
+
+```text
+弹出 b
+弹出 a
+比较 a 和 b
+结果为 0 或 1，压栈
+cont()
+```
+
+比较使用 `int` 解释 4 字节操作数。
+
+---
+
+### 逻辑指令
+
+包括：
+
+```text
+and, or, not
+```
+
+行为：
+
+```text
+and: 弹出 b，弹出 a，压入 a && b
+or : 弹出 b，弹出 a，压入 a || b
+not: 弹出 a，压入 !a
+```
+
+布尔判断沿用现有 `mod_bool()`：
+
+```c
+4 字节里任意一字节非零，即为 true。
+```
+
+---
+
+## 4. 更新构建脚本
+
+修改了：
+
+```text
+build_mods.bat
+```
+
+新增了这些编译项：
+
+```bat
+gcc -shared mods_src/ret.c -o mods/ret.dll libcont.a libvmstate.a
+gcc -shared mods_src/halt.c -o mods/halt.dll
+gcc -shared mods_src/sub.c -o mods/sub.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mul.c -o mods/mul.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/div.c -o mods/div.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mod.c -o mods/mod.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/eq.c -o mods/eq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/neq.c -o mods/neq.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gt.c -o mods/gt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lt.c -o mods/lt.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/gte.c -o mods/gte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/lte.c -o mods/lte.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/and.c -o mods/and.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/or.c -o mods/or.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/not.c -o mods/not.dll libcont.a libvmstack.a libvmstate.a
+```
+
+---
+
+## 5. 编译结果
+
+已执行：
+
+```bat
+build_mods.bat
+```
+
+结果：
+
+```text
+return 0
+```
+
+编译成功，并且生成的 DLL 已按现有流程重命名为 SHA-256 文件名。

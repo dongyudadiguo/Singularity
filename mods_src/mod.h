@@ -15,6 +15,7 @@ extern __declspec(dllimport) u8 *cvm_token(void);
 extern __declspec(dllimport) void cvm_exec(const H h);
 extern __declspec(dllimport) void cvm_exec_payload(H h);
 extern __declspec(dllimport) void cvm_reexec(void);
+extern __declspec(dllimport) int cvm_ret(void);
 extern __declspec(dllimport) void cvm_scope_start(void);
 extern __declspec(dllimport) void cvm_scope_end(void);
 extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);
