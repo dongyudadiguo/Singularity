@@ -3993,3 +3993,7 @@ build_vm.bat
 结果：`vm.exe` 构建成功，无编译错误。
 
 我没有读取 `Singularity/content.md`，也没有读取 `Singularity/agent`。
+
+## user
+
+继续刚才的，还有什么疑问吗？
