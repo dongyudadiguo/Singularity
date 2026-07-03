@@ -33,6 +33,16 @@ gcc -shared mods_src/var_set.c -o mods/var_set.dll libcont.a libvmstack.a libvmv
 gcc -shared mods_src/var_set_payload.c -o mods/var_set_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
 gcc -shared mods_src/scope_start.c -o mods/scope_start.dll libcont.a libvmvar.a libvmstate.a
 gcc -shared mods_src/scope_end.c -o mods/scope_end.dll libcont.a libvmvar.a libvmstate.a
+gcc -shared mods_src/const_payload.c -o mods/const_payload.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/key_get.c -o mods/key_get.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mouse_x.c -o mods/mouse_x.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mouse_y.c -o mods/mouse_y.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mouse_buttons.c -o mods/mouse_buttons.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/block_len.c -o mods/block_len.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
+gcc -shared mods_src/block_read_token.c -o mods/block_read_token.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
+gcc -shared mods_src/block_insert_payload.c -o mods/block_insert_payload.dll libcont.a libvmstack.a libvmstate.a libvmstore.a libvmexec.a libvm.a -lws2_32 -ladvapi32
+gcc -shared mods_src/block_delete.c -o mods/block_delete.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
+gcc -shared mods_src/block_flush.c -o mods/block_flush.dll libcont.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
 gcc -shared mods_src/bootstrap.c -o mods/bootstrap.dll libvm.a libvmexec.a libvmstate.a libvmstore.a -lws2_32 -ladvapi32
 
 gcc -shared mods_src/keyboard.c -o mods/keyboard.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
@@ -42,7 +52,7 @@ gcc -shared mods_src/drawrect.c -o mods/drawrect.dll libcont.a libvmstate.a libd
 gcc -shared mods_src/drawline.c -o mods/drawline.dll libcont.a libvmstate.a libdxgfx.a
 
 echo.
-echo === 重命名 DLL 为 SHA-256 哈希名 ===
+echo === 重命� DLL � SHA-256 哈希� ===
 for %%f in (mods\*.dll) do call :hash_rename "%%f"
 echo === 完成 ===
 goto :eof
@@ -56,7 +66,7 @@ if /i not "%%~nx1"=="!hash!.dll" (
         ren "%~1" "!hash!.dll"
         echo %%~nx1 -^> !hash!.dll
     ) else (
-        echo 警告: !hash!.dll 已存在，跳过 %%~nx1
+        echo 警告: !hash!.dll 已存�，跳� %%~nx1
     )
 ) else (
     echo 跳过 %%~nx1 (已是哈希名^)

@@ -133,6 +133,7 @@ static void upload(const u8 *p, u32 n, H h) { upload_sock(conn, p, n, h); }
 __declspec(dllexport) int cvm_hash_same(const H a, const H b) { return same(a, b); }
 __declspec(dllexport) u8 *cvm_cached_base(void) { return cache_raw; }
 __declspec(dllexport) u32 cvm_cached_len(void) { return cache_len; }
+__declspec(dllexport) void cvm_cached_set_len(u32 n) { if (n <= sizeof(cache_raw)) cache_len = n; }
 __declspec(dllexport) int cvm_cache_hit(const H k) { return cache_on && same(k, cache_key); }
 
 typedef struct AsyncWritebackJob {
