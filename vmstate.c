@@ -23,6 +23,7 @@ __declspec(dllexport) u8 *cvm_payload(void) { return ptr + 36; }
 __declspec(dllexport) u32 cvm_payload_size(void) { return *(u32*)(ptr + 32); }
 __declspec(dllexport) u8 *cvm_current_base(void) { return cur_base; }
 __declspec(dllexport) u8 *cvm_current_key(void) { return cur_key; }
+__declspec(dllexport) void cvm_restart_current(void) { ptr = cur_base; }
 
 __declspec(dllexport) void cvm_set_current(const H k, u8 *base) {
     /*

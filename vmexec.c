@@ -11,6 +11,7 @@ extern __declspec(dllimport) Fn find(H h);
 extern __declspec(dllimport) u8 *ptr;
 extern __declspec(dllimport) u8 *cvm_current_base(void);
 extern __declspec(dllimport) u8 *cvm_current_key(void);
+extern __declspec(dllimport) void cvm_restart_current(void);
 extern __declspec(dllimport) void cvm_set_current(const H k, u8 *base);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
 extern __declspec(dllimport) u32 cvm_cached_len(void);
@@ -66,7 +67,11 @@ __declspec(dllexport) void cvm_exec_payload(H k) {
 }
 
 __declspec(dllexport) void cvm_reexec(void) {
-    H k;
-    memcpy(k, cvm_current_key(), 32);
-    cvm_exec(k);
+    H token;
+    /* Restart the current block in-place.  Calling cvm_exec(current_key) would
+     * enter the same block through cvm_set_current again and leak call frames
+     * on every loop iteration. */
+    cvm_restart_current();
+    memcpy(token, ptr, 32);
+    cvm_exec(token);
 }
