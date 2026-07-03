@@ -3538,3 +3538,13 @@ ERR <class 'subprocess.TimeoutExpired'> Command '['cmd', '/c', 'vm.exe']' timed 
 
 1. 是否允许新增上述 mod？
 2. 首运行程序第一阶段的目标是否按“最小可编辑器”做，而不是一次性完整复刻旧版 `to_dest_dev_base`？
+
+## user
+
+允许新增上述 mod
+
+其中mouse_unpack分成 `mouse_x / mouse_y / mouse_buttons`
+
+另外变量系列mod确保参数不要固定大小而是任意大小的任意数据
+
+先按“最小可编辑器”做，后续做完整
