@@ -3417,3 +3417,644 @@ imp = find(*(H*)b);
 2. **允许新建 bootstrap mod**；  
 3. **允许改造现有 mod 兼任 bootstrap**；  
 4. 或者你希望我只生成离线 `first_block.bin`，暂不保证当前 `vm.c` 能直接首运行。
+
+## user
+
+修改所有dll不应该有mod.h存在
+
+## assistant
+
+我理解为：所有 mod DLL 源码都不能依赖 `mods_src/mod.h`，并且 `mod.h` 文件本身也不应存在。接下来我会批量内联必要声明、删除头文件，并检查没有残留引用。
+
+### tool python call_kWyQqLqB3ssUBkeK2WLdhiHr
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+mods=root/'mods_src'
+for p in sorted(mods.glob('*.c')):
+    text=p.read_text(errors='ignore')
+    if '#include "mod.h"' in text:
+        print(p.name)
+```
+
+## tool call_kWyQqLqB3ssUBkeK2WLdhiHr
+
+```text
+add.c
+and.c
+cond.c
+cond_payload.c
+cond_reexec.c
+div.c
+drawline.c
+drawrect.c
+drawtext.c
+eq.c
+gt.c
+gte.c
+halt.c
+keyboard.c
+lt.c
+lte.c
+mod.c
+mouse.c
+mul.c
+neq.c
+not.c
+or.c
+reexec.c
+ret.c
+scope_end.c
+scope_start.c
+sub.c
+var_read.c
+var_read_payload.c
+var_set.c
+var_set_payload.c
+var_write.c
+var_write_payload.c
+
+```
+
+## assistant
+
+我会用同一组最小 ABI 声明替换每个 `#include "mod.h"`，让每个 DLL 源文件自包含，然后删除 `mods_src/mod.h`。
+
+### tool python call_4LJqObYkSpJPl3eFBkf9JUqY
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+mods=root/'mods_src'
+preamble='''typedef unsigned char u8;\ntypedef unsigned u32;\ntypedef u8 H[32];\n\nextern __declspec(dllimport) u8 *ptr;\nextern __declspec(dllimport) void cont(void);\nextern __declspec(dllimport) void *pop(u32 size);\nextern __declspec(dllimport) void push(const void *p, u32 size);\nextern __declspec(dllimport) u8 *cvm_payload(void);\nextern __declspec(dllimport) u32 cvm_payload_size(void);\nextern __declspec(dllimport) u8 *cvm_token(void);\nextern __declspec(dllimport) void cvm_exec(const H h);\nextern __declspec(dllimport) void cvm_exec_payload(H h);\nextern __declspec(dllimport) void cvm_reexec(void);\nextern __declspec(dllimport) int cvm_ret(void);\nextern __declspec(dllimport) void cvm_scope_start(void);\nextern __declspec(dllimport) void cvm_scope_end(void);\nextern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);\nextern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 size);\nextern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);\n\nstatic int mod_bool(const void *p) {\n    const u8 *b = (const u8*)p;\n    for (u32 i = 0; i < 4; i++) if (b[i]) return 1;\n    return 0;\n}\n'''
+changed=[]
+for p in sorted(mods.glob('*.c')):
+    text=p.read_text(errors='ignore')
+    if '#include "mod.h"' in text:
+        text=text.replace('#include "mod.h"', preamble.rstrip(), 1)
+        p.write_text(text)
+        changed.append(p.name)
+modh=mods/'mod.h'
+if modh.exists():
+    modh.unlink()
+print('changed', len(changed))
+print('\n'.join(changed))
+print('mod.h exists:', modh.exists())
+```
+
+## tool call_4LJqObYkSpJPl3eFBkf9JUqY
+
+```text
+changed 33
+add.c
+and.c
+cond.c
+cond_payload.c
+cond_reexec.c
+div.c
+drawline.c
+drawrect.c
+drawtext.c
+eq.c
+gt.c
+gte.c
+halt.c
+keyboard.c
+lt.c
+lte.c
+mod.c
+mouse.c
+mul.c
+neq.c
+not.c
+or.c
+reexec.c
+ret.c
+scope_end.c
+scope_start.c
+sub.c
+var_read.c
+var_read_payload.c
+var_set.c
+var_set_payload.c
+var_write.c
+var_write_payload.c
+mod.h exists: False
+
+```
+
+## assistant
+
+替换已完成。现在我检查是否还有 `mod.h` 引用或文件残留。
+
+### tool python call_akD6bX7gvH4jxmZwvdCe9sQZ
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+hits=[]
+for p in root.rglob('*'):
+    if 'agent' in p.parts or p.name=='content.md' or '.git' in p.parts:
+        continue
+    if p.is_file():
+        try:
+            s=p.read_text(errors='ignore')
+        except Exception:
+            continue
+        if 'mod.h' in s:
+            hits.append(str(p.relative_to(root)))
+print('hits:', hits)
+print('mod.h files:', [str(p.relative_to(root)) for p in root.rglob('mod.h') if 'agent' not in p.parts])
+```
+
+## tool call_akD6bX7gvH4jxmZwvdCe9sQZ
+
+```text
+hits: []
+mod.h files: []
+
+```
+
+## assistant
+
+已处理：所有 `mods_src/*.c` 都不再 `#include "mod.h"`，必要的 typedef/import 声明已内联到各 DLL 源文件中。
+
+- 删除了 `mods_src/mod.h`
+- 检查确认没有任何 `mod.h` 引用残留
+- 未读取 `Singularity/content.md` 或 `Singularity/agent`
+
+还没重新编译 DLL；如果你要，我可以继续跑 `build_mods.bat` 验证。
+
+## user
+
+删除所有多余的dllimport
+
+## assistant
+
+我会按每个 mod 源文件实际用到的符号精简内联声明，只保留必要的 `dllimport`，并额外移除未使用的 `mod_bool` helper。
+
+### tool python call_KJW15K6bEGA7r2SymSSWGq5L
+
+```
+from pathlib import Path
+p=Path(r'C:\Users\12159\Desktop\Singularity\mods_src\add.c')
+print(p.read_text()[:2000])
+```
+
+## tool call_KJW15K6bEGA7r2SymSSWGq5L
+
+```text
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+extern __declspec(dllimport) u8 *ptr;
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void push(const void *p, u32 size);
+extern __declspec(dllimport) u8 *cvm_payload(void);
+extern __declspec(dllimport) u32 cvm_payload_size(void);
+extern __declspec(dllimport) u8 *cvm_token(void);
+extern __declspec(dllimport) void cvm_exec(const H h);
+extern __declspec(dllimport) void cvm_exec_payload(H h);
+extern __declspec(dllimport) void cvm_reexec(void);
+extern __declspec(dllimport) int cvm_ret(void);
+extern __declspec(dllimport) void cvm_scope_start(void);
+extern __declspec(dllimport) void cvm_scope_end(void);
+extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);
+extern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 size);
+extern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);
+
+static int mod_bool(const void *p) {
+    const u8 *b = (const u8*)p;
+    for (u32 i = 0; i < 4; i++) if (b[i]) return 1;
+    return 0;
+}
+
+__declspec(dllexport) void run(void) {
+    u32 b = *(u32*)pop(4);
+    u32 a = *(u32*)pop(4);
+    u32 r = a + b;
+    push(&r, 4);
+    cont();
+}
+
+
+```
+
+## assistant
+
+我会用脚本基于函数体中的实际调用重写每个文件头部，避免手改遗漏，同时不触碰禁读路径。
+
+### tool python call_uuMm6ozZOiaz1YTrELnUyW3j
+
+```
+from pathlib import Path
+import re
+root=Path(r'C:\Users\12159\Desktop\Singularity\mods_src')
+typedefs={
+'u8':'typedef unsigned char u8;',
+'u32':'typedef unsigned u32;',
+'H':'typedef u8 H[32];',
+}
+externs={
+'ptr':'extern __declspec(dllimport) u8 *ptr;',
+'cont':'extern __declspec(dllimport) void cont(void);',
+'pop':'extern __declspec(dllimport) void *pop(u32 size);',
+'push':'extern __declspec(dllimport) void push(const void *p, u32 size);',
+'cvm_payload':'extern __declspec(dllimport) u8 *cvm_payload(void);',
+'cvm_payload_size':'extern __declspec(dllimport) u32 cvm_payload_size(void);',
+'cvm_token':'extern __declspec(dllimport) u8 *cvm_token(void);',
+'cvm_exec':'extern __declspec(dllimport) void cvm_exec(const H h);',
+'cvm_exec_payload':'extern __declspec(dllimport) void cvm_exec_payload(H h);',
+'cvm_reexec':'extern __declspec(dllimport) void cvm_reexec(void);',
+'cvm_ret':'extern __declspec(dllimport) int cvm_ret(void);',
+'cvm_scope_start':'extern __declspec(dllimport) void cvm_scope_start(void);',
+'cvm_scope_end':'extern __declspec(dllimport) void cvm_scope_end(void);',
+'cvm_var_get':'extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);',
+'cvm_var_set':'extern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 size);',
+'cvm_var_write':'extern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);',
+}
+mod_bool='''static int mod_bool(const void *p) {\n    const u8 *b = (const u8*)p;\n    for (u32 i = 0; i < 4; i++) if (b[i]) return 1;\n    return 0;\n}'''
+# Order matters for readability and dependencies.
+type_order=['u8','u32','H']
+ext_order=['ptr','cont','pop','push','cvm_payload','cvm_payload_size','cvm_token','cvm_exec','cvm_exec_payload','cvm_reexec','cvm_ret','cvm_scope_start','cvm_scope_end','cvm_var_get','cvm_var_set','cvm_var_write']
+changed=[]
+for p in sorted(root.glob('*.c')):
+    text=p.read_text()
+    # Strip current generated typedef/import/helper preamble, preserving includes and code.
+    text=re.sub(r'^typedef unsigned char u8;\n', '', text)
+    text=re.sub(r'^typedef unsigned u32;\n', '', text)
+    text=re.sub(r'^typedef u8 H\[32\];\n', '', text)
+    text=re.sub(r'\n?extern __declspec\(dllimport\) [^;]+;\n', '\n', text)
+    text=text.replace('\n'+mod_bool+'\n', '\n')
+    text=text.replace(mod_bool+'\n', '')
+    text=re.sub(r'\n{3,}', '\n\n', text).lstrip('\n')
+    body=text
+    needed_types=set()
+    needed_ext=[]
+    if re.search(r'\bu8\b', body): needed_types.add('u8')
+    if re.search(r'\bu32\b', body): needed_types.add('u32')
+    if re.search(r'\bH\b', body): needed_types.add('H'); needed_types.add('u8')
+    for name in ext_order:
+        if name=='ptr':
+            used=bool(re.search(r'\bptr\b', body))
+        else:
+            used=bool(re.search(r'\b'+re.escape(name)+r'\s*\(', body))
+        if used:
+            needed_ext.append(name)
+            decl=externs[name]
+            for t in ('H','u8','u32'):
+                if re.search(r'\b'+t+r'\b', decl): needed_types.add(t)
+            if 'H' in needed_types: needed_types.add('u8')
+    need_bool=bool(re.search(r'\bmod_bool\s*\(', body))
+    if need_bool:
+        needed_types.add('u8'); needed_types.add('u32')
+    lines=[]
+    for t in type_order:
+        if t in needed_types:
+            lines.append(typedefs[t])
+    if lines and (needed_ext or need_bool): lines.append('')
+    for name in needed_ext:
+        lines.append(externs[name])
+    if need_bool:
+        if needed_ext: lines.append('')
+        lines.extend(mod_bool.split('\n'))
+    preamble='\n'.join(lines)
+    new=(preamble+'\n\n'+body) if preamble else body
+    if new!=p.read_text():
+        p.write_text(new)
+        changed.append(p.name)
+print('changed', len(changed))
+print('\n'.join(changed))
+```
+
+## tool call_uuMm6ozZOiaz1YTrELnUyW3j
+
+```text
+changed 33
+add.c
+and.c
+cond.c
+cond_payload.c
+cond_reexec.c
+div.c
+drawline.c
+drawrect.c
+drawtext.c
+eq.c
+gt.c
+gte.c
+halt.c
+keyboard.c
+lt.c
+lte.c
+mod.c
+mouse.c
+mul.c
+neq.c
+not.c
+or.c
+reexec.c
+ret.c
+scope_end.c
+scope_start.c
+sub.c
+var_read.c
+var_read_payload.c
+var_set.c
+var_set_payload.c
+var_write.c
+var_write_payload.c
+
+```
+
+## assistant
+
+精简完成。现在抽样检查几个不同类型的 mod，确认声明只剩实际依赖。
+
+### tool python call_IPxykwpDo6jthXUkvQlqaSXo
+
+```
+from pathlib import Path
+for name in ['add.c','cond_payload.c','drawtext.c','halt.c','scope_start.c','var_write_payload.c']:
+ p=Path(r'C:\Users\12159\Desktop\Singularity\mods_src')/name
+ print('\n==',name,'==')
+ print(p.read_text()[:1200])
+```
+
+### tool python call_4sWCMMgIqJIXsqgN3tarp65V
+
+```
+from pathlib import Path
+root=Path(r'C:\Users\12159\Desktop\Singularity')
+for term in ['mod.h','cvm_token']:
+ hits=[]
+ for p in (root/'mods_src').glob('*.c'):
+  s=p.read_text(errors='ignore')
+  if term in s:
+   hits.append(p.name)
+ print(term, hits)
+```
+
+## tool call_IPxykwpDo6jthXUkvQlqaSXo
+
+```text
+
+== add.c ==
+typedef unsigned u32;
+
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void push(const void *p, u32 size);
+
+__declspec(dllexport) void run(void) {
+    u32 b = *(u32*)pop(4);
+    u32 a = *(u32*)pop(4);
+    u32 r = a + b;
+    push(&r, 4);
+    cont();
+}
+
+
+== cond_payload.c ==
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) u8 *cvm_payload(void);
+extern __declspec(dllimport) u32 cvm_payload_size(void);
+extern __declspec(dllimport) void cvm_exec_payload(H h);
+
+static int mod_bool(const void *p) {
+    const u8 *b = (const u8*)p;
+    for (u32 i = 0; i < 4; i++) if (b[i]) return 1;
+    return 0;
+}
+
+__declspec(dllexport) void run(void) {
+    H h;
+    int ok = mod_bool(pop(4));
+    u8 *p = cvm_payload();
+    if (cvm_payload_size() < 32) { cont(); return; }
+    for (u32 i = 0; i < 32; i++) h[i] = p[i];
+    if (ok) cvm_exec_payload(h);
+    else cont();
+}
+
+
+== drawtext.c ==
+typedef unsigned char u8;
+typedef unsigned u32;
+
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) u8 *cvm_payload(void);
+extern __declspec(dllimport) u32 cvm_payload_size(void);
+
+#include "../dxgfx.h"
+
+/* payload layout: s32 x, s32 y, u32 ARGB, f32 size, UTF-8 text bytes... */
+__declspec(dllexport) void run(void) {
+    u8 *p = cvm_payload();
+    u32 n = cvm_payload_size();
+    if (n >= 16) {
+        int x = *(int*)(p + 0);
+        int y = *(int*)(p + 4);
+        u32 argb = *(u32*)(p + 8);
+        float size = *(float*)(p + 12);
+        dxgfx_draw_text(x, y, argb, size, (const char*)(p + 16), n - 16);
+    }
+    cont();
+}
+
+
+== halt.c ==
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+#include <stdlib.h>
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+__declspec(dllexport) void run(void) {
+    exit(0);
+}
+
+
+== scope_start.c ==
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void cvm_scope_start(void);
+
+__declspec(dllexport) void run(void) {
+    cvm_scope_start();
+    cont();
+}
+
+== var_write_payload.c ==
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) u8 *cvm_payload(void);
+extern __declspec(dllimport) u32 cvm_payload_size(void);
+extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);
+extern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);
+
+__declspec(dllexport) void run(void) {
+    H id;
+    u8 *p = cvm_payload();
+    if (cvm_payload_size() < 32) { cont(); return; }
+    for (u32 i = 0; i < 32; i++) id[i] = p[i];
+    u32 vsize;
+    if (!cvm_var_get(id, &vsize)) { cont(); return; }
+    u8 *data = pop(vsize);
+    cvm_var_write(id, data, vsize);
+    cont();
+}
+
+
+```
+
+## tool call_4sWCMMgIqJIXsqgN3tarp65V
+
+```text
+mod.h []
+cvm_token []
+
+```
+
+## assistant
+
+抽样发现 `halt.c` 里有历史重复 typedef，我会再跑一轮更严格的清理，确保没有重复或空声明残留。
+
+### tool python call_UDkjX3VVd4Ya1sVSwh9ityi6
+
+```
+from pathlib import Path
+import re
+root=Path(r'C:\Users\12159\Desktop\Singularity\mods_src')
+typedefs={'u8':'typedef unsigned char u8;','u32':'typedef unsigned u32;','H':'typedef u8 H[32];'}
+externs={
+'ptr':'extern __declspec(dllimport) u8 *ptr;',
+'cont':'extern __declspec(dllimport) void cont(void);',
+'pop':'extern __declspec(dllimport) void *pop(u32 size);',
+'push':'extern __declspec(dllimport) void push(const void *p, u32 size);',
+'cvm_payload':'extern __declspec(dllimport) u8 *cvm_payload(void);',
+'cvm_payload_size':'extern __declspec(dllimport) u32 cvm_payload_size(void);',
+'cvm_token':'extern __declspec(dllimport) u8 *cvm_token(void);',
+'cvm_exec':'extern __declspec(dllimport) void cvm_exec(const H h);',
+'cvm_exec_payload':'extern __declspec(dllimport) void cvm_exec_payload(H h);',
+'cvm_reexec':'extern __declspec(dllimport) void cvm_reexec(void);',
+'cvm_ret':'extern __declspec(dllimport) int cvm_ret(void);',
+'cvm_scope_start':'extern __declspec(dllimport) void cvm_scope_start(void);',
+'cvm_scope_end':'extern __declspec(dllimport) void cvm_scope_end(void);',
+'cvm_var_get':'extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);',
+'cvm_var_set':'extern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 size);',
+'cvm_var_write':'extern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);'}
+mod_bool='''static int mod_bool(const void *p) {\n    const u8 *b = (const u8*)p;\n    for (u32 i = 0; i < 4; i++) if (b[i]) return 1;\n    return 0;\n}'''
+type_order=['u8','u32','H']; ext_order=list(externs)
+changed=[]
+for p in sorted(root.glob('*.c')):
+    original=p.read_text()
+    text=original
+    for line in typedefs.values():
+        text=re.sub(r'^'+re.escape(line)+r'\n', '', text, flags=re.M)
+    text=re.sub(r'^extern __declspec\(dllimport\) [^;]+;\n', '', text, flags=re.M)
+    text=text.replace(mod_bool+'\n', '').replace('\n'+mod_bool, '')
+    text=re.sub(r'\n{3,}', '\n\n', text).lstrip('\n')
+    body=text
+    needed_types=set(); needed_ext=[]
+    if re.search(r'\bu8\b', body): needed_types.add('u8')
+    if re.search(r'\bu32\b', body): needed_types.add('u32')
+    if re.search(r'\bH\b', body): needed_types.update(['H','u8'])
+    for name in ext_order:
+        used=bool(re.search(r'\bptr\b', body)) if name=='ptr' else bool(re.search(r'\b'+re.escape(name)+r'\s*\(', body))
+        if used:
+            needed_ext.append(name)
+            decl=externs[name]
+            for t in ('H','u8','u32'):
+                if re.search(r'\b'+t+r'\b', decl): needed_types.add(t)
+            if 'H' in needed_types: needed_types.add('u8')
+    need_bool=bool(re.search(r'\bmod_bool\s*\(', body))
+    if need_bool: needed_types.update(['u8','u32'])
+    lines=[]
+    for t in type_order:
+        if t in needed_types: lines.append(typedefs[t])
+    if lines and (needed_ext or need_bool): lines.append('')
+    for name in needed_ext: lines.append(externs[name])
+    if need_bool:
+        if needed_ext: lines.append('')
+        lines.extend(mod_bool.split('\n'))
+    preamble='\n'.join(lines)
+    new=(preamble+'\n\n'+body) if preamble else body
+    new=re.sub(r'\n{3,}', '\n\n', new)
+    if new!=original:
+        p.write_text(new)
+        changed.append(p.name)
+print('changed', changed)
+# duplicate typedef/import report
+for p in sorted(root.glob('*.c')):
+    s=p.read_text()
+    dups=[]
+    for line in list(typedefs.values())+list(externs.values()):
+        if s.count(line)>1: dups.append(line)
+    if dups: print('dups', p.name, dups)
+```
+
+## tool call_UDkjX3VVd4Ya1sVSwh9ityi6
+
+```text
+changed ['halt.c']
+
+```
+
+## assistant
+
+清理完成。现在做一次静态扫描：每个文件的 `dllimport` 是否都在函数体中实际使用。
+
+### tool python call_aQ17BT5aeZRlBovgvUgl0xZr
+
+```
+from pathlib import Path
+import re
+root=Path(r'C:\Users\12159\Desktop\Singularity\mods_src')
+for p in sorted(root.glob('*.c')):
+    s=p.read_text()
+    imports=re.findall(r'extern __declspec\(dllimport\).*?\b(\w+)\s*(?:\(|;)', s)
+    # regex imperfect for ptr; handle lines directly
+    unused=[]
+    for line in re.findall(r'^extern __declspec\(dllimport\).*?;$', s, flags=re.M):
+        m=re.search(r'(\w+)\s*(?:\([^;]*\)|;)$', line)
+        name=m.group(1) if m else None
+        if '*ptr;' in line: name='ptr'
+        body=s.split(line,1)[1]
+        # remove other declaration area? Count in whole body after declaration enough after generated order may include future decls.
+        if name and not re.search(r'\b'+re.escape(name)+r'\b', body):
+            unused.append(name)
+    if unused:
+        print(p.name, unused)
+print('done')
+```
+
+## tool call_aQ17BT5aeZRlBovgvUgl0xZr
+
+```text
+done
+
+```
+
+## assistant
+
+已删除所有多余的 `dllimport` 声明：
+
+- 每个 `mods_src/*.c` 现在只保留自身实际使用的导入符号。
+- 未使用的 `mod_bool` helper 也已从不需要它的文件移除。
+- 修掉了 `halt.c` 里的重复 typedef。
+- 静态扫描确认没有发现未使用的 `dllimport` 残留，也没有 `mod.h` 引用。

@@ -1,4 +1,10 @@
-#include "mod.h"
+typedef unsigned char u8;
+typedef unsigned u32;
+typedef u8 H[32];
+
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 size);
 
 __declspec(dllexport) void run(void) {
     H id;

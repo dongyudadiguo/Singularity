@@ -1,4 +1,10 @@
-#include "mod.h"
+typedef unsigned char u8;
+typedef unsigned u32;
+
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) u8 *cvm_payload(void);
+extern __declspec(dllimport) u32 cvm_payload_size(void);
+
 #include "../dxgfx.h"
 
 /* payload layout: s32 x, s32 y, u32 ARGB, f32 size, UTF-8 text bytes... */
