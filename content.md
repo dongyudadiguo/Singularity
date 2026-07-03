@@ -5,7 +5,6 @@
 ## user
 
 不要读取 Singularity/content.md 和 Singularity/agent 文件夹。
-针对性的读取，避免浪费token
 
 项目路径：
 C:\Users\12159\Desktop\Singularity
