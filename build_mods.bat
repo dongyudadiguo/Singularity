@@ -33,6 +33,7 @@ gcc -shared mods_src/var_set.c -o mods/var_set.dll libcont.a libvmstack.a libvmv
 gcc -shared mods_src/var_set_payload.c -o mods/var_set_payload.dll libcont.a libvmstack.a libvmvar.a libvmstate.a
 gcc -shared mods_src/scope_start.c -o mods/scope_start.dll libcont.a libvmvar.a libvmstate.a
 gcc -shared mods_src/scope_end.c -o mods/scope_end.dll libcont.a libvmvar.a libvmstate.a
+gcc -shared mods_src/bootstrap.c -o mods/bootstrap.dll libvm.a libvmexec.a libvmstate.a libvmstore.a -lws2_32 -ladvapi32
 
 gcc -shared mods_src/keyboard.c -o mods/keyboard.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
 gcc -shared mods_src/mouse.c -o mods/mouse.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
