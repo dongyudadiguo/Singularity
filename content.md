@@ -4,7 +4,7 @@
 
 ## user
 
-不要读取 Singularity/content.md 和 Singularity/agent 文件夹。
+不要读取 Singularity/content.md 和 Singularity/agent 和 Singularity/.git 文件夹。
 
 项目路径：
 C:\Users\12159\Desktop\Singularity
