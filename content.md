@@ -3040,3 +3040,7 @@ Singularity first run
   - `Singularity/.git`
 - 没有新建其它 mod。
 - 没有改 `vmexec.c`、`vmstore.c`、`vmstate.c`。
+
+## user
+
+解决了这个问题，现在回到主线
