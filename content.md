@@ -57,9 +57,11 @@ token[32] + payload_size[u32] + payload[payload_size]
    - 修改后写回服务器
    - reexec 持续刷新
 
-## user
+---
 
 以下是上次对话中你最后的回复：
+
+---
 
 可以直接做完整版，但这里有几个旧版到新版的**不兼容点**，按你的规则我必须先问你确认，不能直接继续硬改。
 
@@ -381,6 +383,7 @@ name -> token[32]
    - A：registry block 数据化；
    - B：editor mod 内置表。
 
+<<<<<<< HEAD
 我拿到确认后就直接做完整版。
 
 ## user
@@ -4416,3 +4419,6 @@ vm.exe
 ```
 
 不过注意：`build_mods.bat` 原有 hash 重命名输出有编码/变量显示问题，我这次用 Python 生成了可靠的 `mod_tokens.txt` 并重命名了新增 DLL。后续若要全量稳定构建，建议继续把 `build_mods.bat` 的错误检测和 manifest 输出整理掉。
+=======
+我拿到确认后就直接做完整版。
+>>>>>>> parent of 79f78fd (完整)
