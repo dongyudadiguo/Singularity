@@ -238,3 +238,43 @@ __declspec(dllexport) int cvm_resolve_payload_hash(const H k, H h) {
     cvm_cache_load(k, h);
     return 1;
 }
+
+
+__declspec(dllexport) u32 cvm_children(const H parent, H *out, u32 cap) {
+    u8 st, *r;
+    u32 n, cnt = 0, got = 0;
+    send_op(5, parent, 32);
+    r = recv_frame(&st, &n);
+    if (!st && n >= 4) {
+        cnt = ((u32)r[0] << 24) | ((u32)r[1] << 16) | ((u32)r[2] << 8) | r[3];
+        if (cnt > (n - 4) / 40) cnt = (n - 4) / 40;
+        got = cnt < cap ? cnt : cap;
+        for (u32 i = 0; i < got; i++) memcpy(out[i], r + 4 + i * 40, 32);
+    }
+    free(r);
+    return cnt;
+}
+
+__declspec(dllexport) u32 cvm_file_read(const H h, u8 *out, u32 cap) {
+    u8 *p;
+    u32 n;
+    file_get(h, &p, &n);
+    if (out && cap) memcpy(out, p, n < cap ? n : cap);
+    free(p);
+    return n;
+}
+
+__declspec(dllexport) int cvm_sha256(const u8 *p, u32 n, H out) {
+    return sha256(p, n, out);
+}
+
+__declspec(dllexport) void cvm_edge(const H parent, const H child) {
+    u8 b[64];
+    memcpy(b, parent, 32);
+    memcpy(b + 32, child, 32);
+    send_op(4, b, 64);
+    u8 st, *r;
+    u32 n;
+    r = recv_frame(&st, &n);
+    free(r);
+}
