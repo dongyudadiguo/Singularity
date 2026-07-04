@@ -1,8 +1,8 @@
-## system
+## system ---
 
-主动调动 Python 工具完成任意任务，默认谨慎
+Proactively use Python for any task; cautious by default.
 
-## user
+---
 
 项目路径：C:\Users\12159\Desktop\Singularity
 旧版本路径：C:\Users\12159\Desktop\transition
@@ -57,7 +57,7 @@ token[32] + payload_size[u32] + payload[payload_size]
    - 修改后写回服务器
    - reexec 持续刷新
 
-## user
+---
 
 以下是上次对话中你最后的回复：
 
@@ -383,9 +383,11 @@ name -> token[32]
 
 我拿到确认后就直接做完整版。
 
-## user
+---
 
-1，允许但指令token语义尽量宽
+1，允许但指令token语义尽量宽尽量通用，无关平台，兼容好，简单易用。所以不应该带gfx
 2. 允许修改 `dxgfx.cpp / dxgfx.h`
 3，新版的
 4，从网络遍历，从hash(‘#TAG’)开始，如果每个child的内容以#开头，就代表标签，没有就是指令token
+
+这次要尽量完整版，而不是试验版。
