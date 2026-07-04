@@ -385,7 +385,7 @@ name -> token[32]
 
 ---
 
-1，允许但指令token语义尽量宽，不应该带gfx
+1，允许但指令token语义要尽量宽，所以这里不应该带gfx
 2. 允许修改 `dxgfx.cpp / dxgfx.h`
 3，新版的
 4，从网络遍历，从hash(‘#TAG’)开始，如果每个child的内容以#开头，就代表标签，没有就是指令token
