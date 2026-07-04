@@ -5,6 +5,7 @@ call build_cont.bat
 call build_vmstack.bat
 call build_vmvar.bat
 call build_dxgfx.bat
+gcc -shared editorcore.c -o editorcore.dll -Wl,--out-implib,libeditorcore.a libdxgfx.a -lws2_32 -ladvapi32 -luser32
 gcc -shared mods_src/add.c -o mods/add.dll libcont.a libvmstack.a libvmstate.a
 gcc -shared mods_src/ret.c -o mods/ret.dll libcont.a libvmstate.a
 gcc -shared mods_src/halt.c -o mods/halt.dll
@@ -50,6 +51,10 @@ gcc -shared mods_src/mouse.c -o mods/mouse.dll libcont.a libvmstack.a libvmstate
 gcc -shared mods_src/drawtext.c -o mods/drawtext.dll libcont.a libvmstate.a libdxgfx.a
 gcc -shared mods_src/drawrect.c -o mods/drawrect.dll libcont.a libvmstate.a libdxgfx.a
 gcc -shared mods_src/drawline.c -o mods/drawline.dll libcont.a libvmstate.a libdxgfx.a
+
+for %%m in (gfx_frame_begin gfx_clear gfx_frame_end gfx_screen_size gfx_window_should_close gfx_set_camera gfx_world_mouse key_down key_pressed key_released text_input mouse_wheel mouse_down) do gcc -shared mods_src/%%m.c -o mods/%%m.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a -luser32
+for %%m in (editor_init editor_update_input editor_render_views editor_flush_current editor_frame editor_state_read editor_state_write editor_update_mouse editor_insert_auto editor_insert_block editor_insert_data editor_delete_range editor_copy_range editor_paste_range editor_move_cursor editor_render_completion editor_should_halt) do gcc -shared mods_src/%%m.c -o mods/%%m.dll libcont.a libvmstack.a libvmstate.a libeditorcore.a libdxgfx.a -luser32
+for %%m in (block_next_offset block_prev_offset block_payload_read block_replace_payload block_payload_write block_copy_range block_move_range block_ensure_ret) do gcc -shared mods_src/%%m.c -o mods/%%m.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
 
 echo.
 echo === ÈáçÂëΩÂê DLL ‰∏ SHA-256 ÂìàÂ∏åÂê ===

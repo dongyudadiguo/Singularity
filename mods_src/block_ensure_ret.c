@@ -1,0 +1,3 @@
+#include <string.h>
+typedef unsigned char u8; typedef unsigned u32; extern __declspec(dllimport) void cont(void); extern __declspec(dllimport) u8*cvm_cached_base(void); extern __declspec(dllimport) u32 cvm_cached_len(void); extern __declspec(dllimport) void cvm_cached_set_len(u32); extern __declspec(dllimport) u8*cvm_payload(void); extern __declspec(dllimport) u32 cvm_payload_size(void);
+__declspec(dllexport) void run(void){ u8*p=cvm_payload(); if(cvm_payload_size()<32){cont();return;} u8*b=cvm_cached_base(); u32 len=cvm_cached_len(); if(len>=68 && !memcmp(b+len-68,p,32)){cont();return;} if(len+36<=1u<<20 && len>=32){ memmove(b+len+4,b+len-32,32); memcpy(b+len-32,p,32); *(u32*)(b+len)=0; cvm_cached_set_len(len+36);} cont(); }
