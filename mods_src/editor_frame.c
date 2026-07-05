@@ -57,6 +57,8 @@ static int zero32(const u8 *p){ for(int i=0;i<32;i++) if(p[i]) return 0; return 
 static u32 ins_size(const u8 *p){ return 36u + *(u32*)(p + 32); }
 static int valid_off(u8 *b, u32 len, u32 off){ return len >= 32 && off <= len - 32 && !zero32(b + off) && off + 36 <= len && off + ins_size(b + off) <= len; }
 static int key_same(const H a, const H b){ return memcmp(a,b,32)==0; }
+static int printable_ascii(const u8 *p, u32 n){ for(u32 i=0;i<n;i++) if(p[i]<32 || p[i]>126) return 0; return 1; }
+static int looks_like_dll(const u8 *p, u32 n){ return n >= 2 && p[0] == 'M' && p[1] == 'Z'; }
 
 static void hex8(const H h, char *out){ static const char x[]="0123456789abcdef"; for(int i=0;i<4;i++){ out[i*2]=x[h[i]>>4]; out[i*2+1]=x[h[i]&15]; } out[8]=0; }
 
@@ -74,6 +76,20 @@ static void append_reg(const H token, const char *name, int tag) {
     E.reg_count++;
 }
 
+static int registry_child_name(const H token, char *name, u32 cap) {
+    H kids[64];
+    u32 n = cvm_children(token, kids, 64);
+    if (n > 64) n = 64;
+    for (u32 i=0;i<n;i++) {
+        memset(name,0,cap);
+        u32 got = cvm_file_read(kids[i], (u8*)name, cap-1);
+        u32 chk = got < cap-1 ? got : cap-1;
+        if (got && name[0] != '#' && printable_ascii((u8*)name, chk) && !looks_like_dll((u8*)name, got)) return 1;
+    }
+    name[0] = 0;
+    return 0;
+}
+
 static void load_registry_rec(const H parent, int depth) {
     if (depth > 6 || E.reg_count >= MAX_REG) return;
     H kids[256];
@@ -84,8 +100,12 @@ static void load_registry_rec(const H parent, int depth) {
         memset(name,0,sizeof(name));
         u32 got = cvm_file_read(kids[i], (u8*)name, sizeof(name)-1);
         int is_tag = got > 0 && name[0] == '#';
-        append_reg(kids[i], got ? name : "?", is_tag);
-        if (is_tag) load_registry_rec(kids[i], depth+1);
+        if (is_tag) {
+            append_reg(kids[i], name, 1);
+            load_registry_rec(kids[i], depth+1);
+        } else if (registry_child_name(kids[i], name, sizeof(name))) {
+            append_reg(kids[i], name, 0);
+        }
     }
 }
 
@@ -131,6 +151,18 @@ static void update_completion(void) {
     }
 }
 
+static int command_key_pressed(u8 *pressed) {
+    return pressed[VK_SPACE] || pressed[VK_TAB] || pressed[VK_RMENU] || pressed[VK_LMENU] ||
+           pressed[VK_OEM_3] || pressed[VK_DELETE] || pressed[VK_INSERT] ||
+           pressed[VK_BACK] || pressed[VK_ESCAPE] || pressed[VK_RETURN];
+}
+
+static void clear_input(void) {
+    E.input[0] = 0;
+    E.completion[0] = 0;
+    E.completion_index = 0xffffffffu;
+}
+
 static void load_view(u32 vi) {
     H h;
     cvm_resolve_payload_hash(E.views[vi].key, h);
@@ -162,14 +194,14 @@ static void insert_data_text(void) {
     if (!E.input[0]) return;
     H tok; const char label[]="data"; cvm_sha256((const u8*)label, 4, tok);
     insert_raw(E.point_off, tok, (const u8*)E.input, (u32)strlen(E.input));
-    E.input[0]=0;
+    clear_input();
 }
 
 static void insert_completion(void) {
     if (E.completion_index == 0xffffffffu) return;
     RegEntry *r=&E.reg[E.completion_index];
     insert_raw(E.point_off, r->token, 0, 0);
-    E.input[0]=0;
+    clear_input();
 }
 
 static void create_child_block(void) {
@@ -181,7 +213,7 @@ static void create_child_block(void) {
     if (E.view_count < MAX_VIEWS) {
         View *v=&E.views[E.view_count++]; v->used=1; memcpy(v->key,k,32); v->x=E.views[E.active_view].x+360; v->y=E.views[E.active_view].y;
     }
-    E.input[0]=0;
+    clear_input();
 }
 
 static void copy_range(u32 a, u32 b) {
@@ -236,8 +268,9 @@ static void draw_view(u32 vi, float mwx, float mwy, int mouse_pressed) {
 }
 
 static void handle_input(u8 *down, u8 *pressed, u8 *released, int *mouse, char *text, float mwx, float mwy) {
+    if (pressed[VK_ESCAPE]) clear_input();
     size_t l=strlen(E.input);
-    if (text[0] && l < sizeof(E.input)-1) strncat(E.input,text,sizeof(E.input)-1-l);
+    if (text[0] && !command_key_pressed(pressed) && l < sizeof(E.input)-1) strncat(E.input,text,sizeof(E.input)-1-l);
     if (pressed[VK_BACK] && l) E.input[l-1]=0;
     update_completion();
 
@@ -258,6 +291,15 @@ static void handle_input(u8 *down, u8 *pressed, u8 *released, int *mouse, char *
     E.last_mx=(float)mouse[0]; E.last_my=(float)mouse[1];
 }
 
+static void draw_hud(int mx, int my) {
+    char hud[420];
+    const char *match = E.completion[0] ? E.completion : "";
+    if (E.reg_count == 0) snprintf(hud,sizeof(hud),"%s%s registry:empty%s",E.input,match,E.dirty?" *":"");
+    else snprintf(hud,sizeof(hud),"%s%s%s",E.input,match,E.dirty?" *":"");
+    dxgfx_draw_rect((float)mx+14,(float)my-2,360,24,0xcc101214,1,1);
+    dxgfx_draw_text(mx+20,my,0xffffffff,18.0f,hud,(u32)strlen(hud));
+}
+
 __declspec(dllexport) void run(void) {
     if (!E.ready) {
         H tag; const char s[]="#TAG";
@@ -275,10 +317,9 @@ __declspec(dllexport) void run(void) {
     dxgfx_clear(0xff101214);
     dxgfx_set_camera(E.cam_x,E.cam_y,E.zoom);
     for (u32 i=0;i<E.view_count;i++) draw_view(i,wm[0],wm[1],mouse[3]);
-    char hud[420];
-    snprintf(hud,sizeof(hud),"%s %s%s",E.input,E.completion,E.dirty?" *":"");
+    load_view(E.active_view);
     dxgfx_set_camera(0,0,1.0f);
-    dxgfx_draw_text(mouse[0]+20,mouse[1],0xffffffff,18.0f,hud,(u32)strlen(hud));
+    draw_hud(mouse[0], mouse[1]);
     dxgfx_frame_end();
     Sleep(8);
     cont();
