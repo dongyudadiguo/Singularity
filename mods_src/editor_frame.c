@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef unsigned char u8;
 typedef unsigned u32;
@@ -301,6 +302,8 @@ static void draw_hud(int mx, int my) {
 }
 
 __declspec(dllexport) void run(void) {
+    static int frame_num = 0;
+    clock_t frame_start = clock();
     if (!E.ready) {
         H tag; const char s[]="#TAG";
         cvm_sha256((const u8*)s,4,tag);
@@ -317,10 +320,14 @@ __declspec(dllexport) void run(void) {
     dxgfx_clear(0xff101214);
     dxgfx_set_camera(E.cam_x,E.cam_y,E.zoom);
     for (u32 i=0;i<E.view_count;i++) draw_view(i,wm[0],wm[1],mouse[3]);
-    load_view(E.active_view);
     dxgfx_set_camera(0,0,1.0f);
     draw_hud(mouse[0], mouse[1]);
     dxgfx_frame_end();
+    clock_t frame_end = clock();
+    printf("[frame] #%d time=%lu ms views=%u active=%u\n",
+           frame_num++,
+           (unsigned long)((frame_end-frame_start)*1000/CLOCKS_PER_SEC),
+           E.view_count, E.active_view);
     Sleep(8);
     cont();
 }

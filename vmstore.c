@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #pragma comment(lib, "advapi32.lib")
 
@@ -13,7 +14,7 @@
  *   - token -> user override hash lookup (op 8)
  *   - fallback token -> first child hash lookup
  *   - hash -> file bytes loading (op 3)
- *   - a one-entry in-process block cache
+ *   - a multi-entry LRU in-process block cache (8 slots)
  *   - non-blocking write-back when cached bytes no longer match cache_hash
  */
 
@@ -25,10 +26,24 @@ extern __declspec(dllimport) SOCKET conn;
 extern __declspec(dllimport) void cvm_firstchild(H p, H c);
 
 static H id;
-static int cache_on;
-static u8 cache_raw[1<<20];
-static u32 cache_len;
-static H cache_key, cache_hash;
+
+/* Multi-entry LRU cache */
+#define CACHE_SLOTS 8
+
+typedef struct {
+    H key;
+    H hash;
+    u8 data[1<<20];
+    u32 len;
+    int on;
+    u32 lru;
+} CacheSlot;
+
+static CacheSlot slots[CACHE_SLOTS];
+static int primary_idx = 0;
+static u32 lru_counter = 0;
+
+/* Networking helpers */
 
 static void readn_sock(SOCKET s, void *b, u32 n) {
     u32 g = 0;
@@ -130,11 +145,28 @@ static void upload_sock(SOCKET s, const u8 *p, u32 n, H h) {
 
 static void upload(const u8 *p, u32 n, H h) { upload_sock(conn, p, n, h); }
 
+/* Cache API */
+
 __declspec(dllexport) int cvm_hash_same(const H a, const H b) { return same(a, b); }
-__declspec(dllexport) u8 *cvm_cached_base(void) { return cache_raw; }
-__declspec(dllexport) u32 cvm_cached_len(void) { return cache_len; }
-__declspec(dllexport) void cvm_cached_set_len(u32 n) { if (n <= sizeof(cache_raw)) cache_len = n; }
-__declspec(dllexport) int cvm_cache_hit(const H k) { return cache_on && same(k, cache_key); }
+
+__declspec(dllexport) u8 *cvm_cached_base(void) { return slots[primary_idx].data; }
+__declspec(dllexport) u32 cvm_cached_len(void) { return slots[primary_idx].len; }
+__declspec(dllexport) void cvm_cached_set_len(u32 n) {
+    if (n <= sizeof(slots[0].data)) slots[primary_idx].len = n;
+}
+
+__declspec(dllexport) int cvm_cache_hit(const H k) {
+    for (int i = 0; i < CACHE_SLOTS; i++) {
+        if (slots[i].on && same(k, slots[i].key)) {
+            slots[i].lru = ++lru_counter;
+            primary_idx = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Async writeback */
 
 typedef struct AsyncWritebackJob {
     H key;
@@ -171,28 +203,24 @@ static DWORD WINAPI async_writeback_thread(LPVOID arg) {
     return 0;
 }
 
-/*
- * Cache-hit consistency check.  If bytes no longer hash to cache_hash, do not
- * block cvm_exec: copy the bytes and update user override + uploaded file on a
- * detached worker connection.
- */
 __declspec(dllexport) void cvm_cache_verify_async(void) {
     H h;
     AsyncWritebackJob *j;
     HANDLE th;
-    if (!cache_on) return;
-    if (!sha256(cache_raw, cache_len, h)) return;
-    if (same(h, cache_hash)) return;
+    CacheSlot *s = &slots[primary_idx];
+    if (!s->on) return;
+    if (!sha256(s->data, s->len, h)) return;
+    if (same(h, s->hash)) return;
 
     j = (AsyncWritebackJob*)malloc(sizeof(*j));
     if (!j) return;
-    memcpy(j->key, cache_key, 32);
-    j->len = cache_len;
-    j->data = (u8*)malloc(cache_len ? cache_len : 1);
+    memcpy(j->key, s->key, 32);
+    j->len = s->len;
+    j->data = (u8*)malloc(s->len ? s->len : 1);
     if (!j->data) { free(j); return; }
-    memcpy(j->data, cache_raw, cache_len);
+    memcpy(j->data, s->data, s->len);
 
-    memcpy(cache_hash, h, 32);
+    memcpy(s->hash, h, 32);
     th = CreateThread(0, 0, async_writeback_thread, j, 0, 0);
     if (th) CloseHandle(th);
     else { free(j->data); free(j); }
@@ -200,45 +228,64 @@ __declspec(dllexport) void cvm_cache_verify_async(void) {
 
 __declspec(dllexport) void cvm_cache_flush(void) {
     H h;
-    if (!cache_on) return;
-    upload(cache_raw, cache_len, h);
-    if (!same(h, cache_hash)) { uset(cache_key, h); memcpy(cache_hash, h, 32); }
+    CacheSlot *s = &slots[primary_idx];
+    if (!s->on) return;
+    upload(s->data, s->len, h);
+    if (!same(h, s->hash)) { uset(s->key, h); memcpy(s->hash, h, 32); }
 }
 
 __declspec(dllexport) void cvm_upload_async(const u8 *p, u32 n) {
-    /* Legacy symbol: keep fire-and-forget upload semantics. */
     send_op(2, p, n);
 }
 
 __declspec(dllexport) void cvm_cache_load(const H k, const H h) {
     u8 *p;
     u32 n;
-    memcpy(cache_key, k, 32);
-    memcpy(cache_hash, h, 32);
+    int target = -1;
+    for (int i = 0; i < CACHE_SLOTS; i++) {
+        if (!slots[i].on) { target = i; break; }
+    }
+    if (target < 0) {
+        target = 0;
+        for (int i = 1; i < CACHE_SLOTS; i++) {
+            if (slots[i].lru < slots[target].lru) target = i;
+        }
+    }
+    memcpy(slots[target].key, k, 32);
+    memcpy(slots[target].hash, h, 32);
     file_get(h, &p, &n);
-    if (n > sizeof(cache_raw)) n = sizeof(cache_raw);
-    memcpy(cache_raw, p, n);
-    cache_len = n;
+    if (n > sizeof(slots[0].data)) n = sizeof(slots[0].data);
+    memcpy(slots[target].data, p, n);
+    slots[target].len = n;
     free(p);
-    cache_on = 1;
+    slots[target].on = 1;
+    slots[target].lru = ++lru_counter;
+    primary_idx = target;
 }
 
-/*
- * Resolve token to block content:
- *   cache hit  -> verify cached hash/content consistency asynchronously
- *   cache miss -> request user override; if absent, use token's first child
- */
 __declspec(dllexport) int cvm_resolve_payload_hash(const H k, H h) {
+    clock_t t0 = clock();
     if (cvm_cache_hit(k)) {
-        memcpy(h, cache_hash, 32);
+        memcpy(h, slots[primary_idx].hash, 32);
         cvm_cache_verify_async();
+        clock_t t1 = clock();
+        printf("[vmstore] HIT  slot=%d key=%02x%02x%02x%02x time=%lu us\n",
+               primary_idx, k[0],k[1],k[2],k[3],
+               (unsigned long)((t1-t0)*1000000/CLOCKS_PER_SEC));
         return 1;
     }
+    clock_t t_net = clock();
     if (!uget(k, h)) cvm_firstchild((u8*)k, h);
+    clock_t t_load = clock();
     cvm_cache_load(k, h);
+    clock_t t1 = clock();
+    printf("[vmstore] MISS slot=%d key=%02x%02x%02x%02x net=%lu us load=%lu us total=%lu us\n",
+           primary_idx, k[0],k[1],k[2],k[3],
+           (unsigned long)((t_load-t_net)*1000000/CLOCKS_PER_SEC),
+           (unsigned long)((t1-t_load)*1000000/CLOCKS_PER_SEC),
+           (unsigned long)((t1-t0)*1000000/CLOCKS_PER_SEC));
     return 1;
 }
-
 
 __declspec(dllexport) u32 cvm_children(const H parent, H *out, u32 cap) {
     u8 st, *r;
