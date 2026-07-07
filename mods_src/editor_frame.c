@@ -320,7 +320,7 @@ __declspec(dllexport) void run(void) {
     dxgfx_clear(0xff101214);
     dxgfx_set_camera(E.cam_x,E.cam_y,E.zoom);
     for (u32 i=0;i<E.view_count;i++) draw_view(i,wm[0],wm[1],mouse[3]);
-    dxgfx_set_camera(0,0,1.0f);
+    dxgfx_set_camera(640.0f,360.0f,1.0f);
     draw_hud(mouse[0], mouse[1]);
     dxgfx_frame_end();
     clock_t frame_end = clock();

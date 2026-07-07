@@ -81,6 +81,7 @@ static void load_id(void) {
     if (memcmp(id, z, 32)) return;
     FILE *f = fopen("id.bin", "rb");
     if (f) { fread(id, 1, 32, f); fclose(f); }
+    CreateDirectoryA("cache", NULL);
 }
 
 static int same(const H a, const H b) { return !memcmp(a, b, 32); }
@@ -129,9 +130,31 @@ static void uset_sock(SOCKET s, const H k, const H v) {
 static void uset(const H k, const H v) { uset_sock(conn, k, v); }
 
 static void file_get(const H h, u8 **p, u32 *n) {
+    char path[120];
+    snprintf(path, sizeof(path),
+        "cache/%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x.bin",
+        h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],
+        h[8],h[9],h[10],h[11],h[12],h[13],h[14],h[15],
+        h[16],h[17],h[18],h[19],h[20],h[21],h[22],h[23],
+        h[24],h[25],h[26],h[27],h[28],h[29],h[30],h[31]);
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        *n = (u32)ftell(f);
+        fseek(f, 0, SEEK_SET);
+        *p = (u8*)malloc(*n ? *n : 1);
+        if (*p) fread(*p, 1, *n, f);
+        fclose(f);
+        return;
+    }
     u8 st;
     send_op(3, h, 32);
     *p = recv_frame(&st, n);
+    f = fopen(path, "wb");
+    if (f) { fwrite(*p, 1, *n, f); fclose(f); }
 }
 
 static void upload_sock(SOCKET s, const u8 *p, u32 n, H h) {
@@ -267,7 +290,7 @@ __declspec(dllexport) int cvm_resolve_payload_hash(const H k, H h) {
     clock_t t0 = clock();
     if (cvm_cache_hit(k)) {
         memcpy(h, slots[primary_idx].hash, 32);
-        cvm_cache_verify_async();
+        { static int _vc = 0; if (++_vc % 30 == 0) cvm_cache_verify_async(); }
         clock_t t1 = clock();
         printf("[vmstore] HIT  slot=%d key=%02x%02x%02x%02x time=%lu us\n",
                primary_idx, k[0],k[1],k[2],k[3],
