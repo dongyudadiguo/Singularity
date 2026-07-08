@@ -5,6 +5,7 @@
 #include <time.h>
 
 typedef unsigned char u8;
+typedef unsigned short u16;
 typedef unsigned u32;
 typedef u8 H[32];
 
@@ -76,6 +77,83 @@ static int looks_like_dll(const u8 *p, u32 n){ return n >= 2 && p[0] == 'M' && p
 
 static void hex8(const H h, char *out){ static const char x[]="0123456789abcdef"; for(int i=0;i<4;i++){ out[i*2]=x[h[i]>>4]; out[i*2+1]=x[h[i]&15]; } out[8]=0; }
 
+static void hex64(const H h, char *out){ static const char x[]="0123456789abcdef"; for(int i=0;i<32;i++){ out[i*2]=x[h[i]>>4]; out[i*2+1]=x[h[i]&15]; } out[64]=0; }
+
+/* PE export reader */
+#define MAX_EXPORTS 64
+
+static int pe_read_exports(const char *path, char exports[MAX_EXPORTS][64], int *count) {
+    FILE *f; long fsize; u8 *data; u32 pe_off; u16 num_sec, opt_sz, magic;
+    u32 export_rva, exp_off, num_names, addr_names_rva;
+    u32 sec_start, i, j;
+    typedef struct { u32 vrva, vsize, rptr; } Sec;
+    Sec secs[96]; int nsec;
+
+    *count = 0;
+    f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END); fsize = ftell(f); fseek(f, 0, SEEK_SET);
+    if (fsize < 64) { fclose(f); return 0; }
+    data = (u8*)malloc((u32)fsize);
+    if (!data) { fclose(f); return 0; }
+    { size_t rd = fread(data, 1, (u32)fsize, f); fclose(f);
+      if (rd != (size_t)fsize) { free(data); return 0; }
+    }
+
+    if (data[0]!='M'||data[1]!='Z') { free(data); return 0; }
+    pe_off = *(u32*)(data+0x3C);
+    if (pe_off+24>(u32)fsize||data[pe_off]!='P'||data[pe_off+1]!='E') { free(data); return 0; }
+    num_sec = *(u16*)(data+pe_off+6);
+    opt_sz = *(u16*)(data+pe_off+20);
+    magic = *(u16*)(data+pe_off+24);
+    if (magic==0x20b) export_rva = *(u32*)(data+pe_off+24+112);
+    else export_rva = *(u32*)(data+pe_off+24+96);
+    if (!export_rva) { free(data); return 0; }
+
+    sec_start = pe_off + 24 + opt_sz;
+    nsec = num_sec < 96 ? num_sec : 96;
+    for (i=0; i<(u32)nsec; i++) {
+        u32 off = sec_start + i*40;
+        if (off+40 > (u32)fsize) { free(data); return 0; }
+        secs[i].vsize = *(u32*)(data+off+8);
+        secs[i].vrva = *(u32*)(data+off+12);
+        secs[i].rptr = *(u32*)(data+off+20);
+    }
+
+    exp_off = 0;
+    for (i=0; i<(u32)nsec; i++)
+        if (secs[i].vrva<=export_rva && export_rva<secs[i].vrva+secs[i].vsize) {
+            exp_off = secs[i].rptr + (export_rva - secs[i].vrva); break; }
+    if (!exp_off||exp_off+40>(u32)fsize) { free(data); return 0; }
+
+    num_names = *(u32*)(data+exp_off+24);
+    addr_names_rva = *(u32*)(data+exp_off+32);
+
+    for (i=0; i<num_names && *count<MAX_EXPORTS; i++) {
+        u32 nrva, nfile, noff = addr_names_rva + i*4;
+        for (j=0; j<(u32)nsec; j++)
+            if (secs[j].vrva<=noff && noff<secs[j].vrva+secs[j].vsize) {
+                noff = secs[j].rptr + (noff - secs[j].vrva); goto got_nptr; }
+        continue;
+        got_nptr:
+        if (noff+4>(u32)fsize) continue;
+        nrva = *(u32*)(data+noff);
+        nfile = 0;
+        for (j=0; j<(u32)nsec; j++)
+            if (secs[j].vrva<=nrva && nrva<secs[j].vrva+secs[j].vsize) {
+                nfile = secs[j].rptr + (nrva - secs[j].vrva); break; }
+        if (!nfile||nfile>=(u32)fsize) continue;
+        { int len=0;
+          while (nfile+len<(u32)fsize && data[nfile+len] && len<63)
+            { exports[*count][len]=data[nfile+len]; len++; }
+          exports[*count][len]=0;
+        }
+        (*count)++;
+    }
+    free(data);
+    return 1;
+}
+
 static const char *name_for(const H token) {
     for (u32 i=0;i<E.reg_count;i++) if (!E.reg[i].tag && key_same(E.reg[i].token, token)) return E.reg[i].name;
     for (u32 i=0;i<E.nc_count;i++) if (key_same(E.nc[i].tok, token)) return E.nc[i].nm;
@@ -100,6 +178,129 @@ static void nc_load(void) {
     if(E.nc_count>MAX_NC) E.nc_count=MAX_NC;
     fread(E.nc,sizeof(NCEntry),E.nc_count,f);
     fclose(f);
+}
+
+/* Scan mods/ directory, build signature->name map from known nc entries,
+   then resolve all unknown DLLs by matching their export signature + file size. */
+/* Scan mods/ directory, build export-signature->name map from known nc entries,
+   then resolve all unknown DLLs by matching their export function signatures.
+   For unique signatures (e.g. editor_state_init,run -> editor_frame), this works
+   across different DLL versions. For ambiguous signatures (e.g. "run" used by 400+
+   DLLs), we fall back to hex hash. */
+/* Scan mods/ directory, build export-signature->name map from known nc entries,
+   then resolve all unknown DLLs. Uses two-tier matching:
+   1) Signature-only match (for unique sigs like editor_state_init,run -> editor_frame)
+   2) Signature+size match (for "run" sigs where size disambiguates: run+38298 -> editor_init) */
+static void nc_scan_mods(void) {
+    WIN32_FIND_DATAA fd;
+    HANDLE fh;
+    char hex[65], path[260];
+    char exports[MAX_EXPORTS][64];
+    int nexp;
+
+    /* Phase 1: Build sig -> (name, size) from nc entries */
+    #define MAX_SM 256
+    typedef struct { char sig[512]; u32 size; char name[96]; } SigEntry;
+    static SigEntry sm[MAX_SM];
+    int sm_count = 0;
+
+    for (u32 i = 0; i < E.nc_count && sm_count < MAX_SM; i++) {
+        hex64(E.nc[i].tok, hex);
+        snprintf(path, sizeof(path), "mods/%s.dll", hex);
+        if (!pe_read_exports(path, exports, &nexp)) continue;
+        if (nexp == 0) continue;
+
+        for (int a = 0; a < nexp-1; a++)
+            for (int b = a+1; b < nexp; b++)
+                if (strcmp(exports[a], exports[b]) > 0) {
+                    char tmp[64]; strcpy(tmp, exports[a]);
+                    strcpy(exports[a], exports[b]); strcpy(exports[b], tmp);
+                }
+
+        char sig[512] = "";
+        for (int a = 0; a < nexp; a++) {
+            if (a) strcat(sig, ",");
+            strcat(sig, exports[a]);
+        }
+
+        FILE *f = fopen(path, "rb");
+        u32 fsize = 0;
+        if (f) { fseek(f, 0, SEEK_END); fsize = (u32)ftell(f); fclose(f); }
+
+        int found = -1;
+        for (int j = 0; j < sm_count; j++) {
+            if (sm[j].size == fsize && strcmp(sm[j].sig, sig) == 0) { found = j; break; }
+        }
+        if (found >= 0) {
+            if (strcmp(sm[found].name, E.nc[i].nm) != 0) {
+                sm[found].name[0] = '?'; sm[found].name[1] = 0;
+            }
+        } else {
+            strncpy(sm[sm_count].sig, sig, 511); sm[sm_count].sig[511] = 0;
+            sm[sm_count].size = fsize;
+            strncpy(sm[sm_count].name, E.nc[i].nm, 95); sm[sm_count].name[95] = 0;
+            sm_count++;
+        }
+    }
+
+    /* Phase 2: Scan all DLLs */
+    fh = FindFirstFileA("mods/*.dll", &fd);
+    if (fh == INVALID_HANDLE_VALUE) return;
+
+    int added = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        strncpy(hex, fd.cFileName, 64); hex[64] = 0;
+        char *dot = strrchr(hex, '.');
+        if (dot) *dot = 0;
+        if (strlen(hex) != 64) continue;
+
+        H tok;
+        for (int j = 0; j < 32; j++) {
+            int hi = hex[j*2]>='a'?hex[j*2]-'a'+10:hex[j*2]>='A'?hex[j*2]-'A'+10:hex[j*2]-'0';
+            int lo = hex[j*2+1]>='a'?hex[j*2+1]-'a'+10:hex[j*2+1]>='A'?hex[j*2+1]-'A'+10:hex[j*2+1]-'0';
+            tok[j] = (u8)(hi*16+lo);
+        }
+        int already = 0;
+        for (u32 i = 0; i < E.nc_count; i++)
+            if (key_same(E.nc[i].tok, tok)) { already = 1; break; }
+        if (already) continue;
+
+        snprintf(path, sizeof(path), "mods/%s", fd.cFileName);
+        if (!pe_read_exports(path, exports, &nexp)) continue;
+        if (nexp == 0) continue;
+
+        for (int a = 0; a < nexp-1; a++)
+            for (int b = a+1; b < nexp; b++)
+                if (strcmp(exports[a], exports[b]) > 0) {
+                    char tmp2[64]; strcpy(tmp2, exports[a]);
+                    strcpy(exports[a], exports[b]); strcpy(exports[b], tmp2);
+                }
+
+        char sig[512] = "";
+        for (int a = 0; a < nexp; a++) {
+            if (a) strcat(sig, ",");
+            strcat(sig, exports[a]);
+        }
+
+        FILE *f = fopen(path, "rb");
+        u32 fsize = 0;
+        if (f) { fseek(f, 0, SEEK_END); fsize = (u32)ftell(f); fclose(f); }
+
+        char *best = NULL;
+        for (int j = 0; j < sm_count; j++) {
+            if (sm[j].name[0] == '?') continue;
+            if (strcmp(sm[j].sig, sig) != 0) continue;
+            if (!best) { best = sm[j].name; continue; }
+            if (sm[j].size == fsize) { best = sm[j].name; break; }
+        }
+
+        if (best) {
+            nc_add(tok, best);
+            added++;
+        }
+    } while (FindNextFileA(fh, &fd));
+    FindClose(fh);
 }
 
 static void append_reg(const H token, const char *name, int tag) {
@@ -160,6 +361,7 @@ __declspec(dllexport) int editor_state_init(const H current_key, const H registr
     for(u32 i=0;i<E.reg_count;i++)
         if(!E.reg[i].tag && E.reg[i].name[0] && E.reg[i].name[0]!='?')
             nc_add(E.reg[i].token, E.reg[i].name);
+    nc_scan_mods();
     nc_save();
     E.ready = 1;
     return 1;
@@ -275,7 +477,7 @@ static void draw_payload_summary(u8 *p, u32 n, float x, float y) {
     if (!n) return;
     char buf[120]; u32 m=n<48?n:48;
     int printable=1; for(u32 i=0;i<m;i++) if(p[i]<32 || p[i]>126) printable=0;
-    if (printable) { snprintf(buf,sizeof(buf),"  '%.*s'",(int)m,(char*)p); }
+    if (printable) { snprintf(buf,sizeof(buf),"  \'%.*s\'",(int)m,(char*)p); }
     else { snprintf(buf,sizeof(buf),"  [%u bytes]",n); }
     dxgfx_draw_text((int)x,(int)y,0xff7cc6ff,18.0f,buf,(u32)strlen(buf));
 }
