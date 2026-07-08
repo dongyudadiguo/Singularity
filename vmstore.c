@@ -311,15 +311,48 @@ __declspec(dllexport) int cvm_resolve_payload_hash(const H k, H h) {
 }
 
 __declspec(dllexport) u32 cvm_children(const H parent, H *out, u32 cap) {
-    u8 st, *r;
-    u32 n, cnt = 0, got = 0;
+    char path[140];
+    snprintf(path, sizeof(path),
+        "cache/%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x_ch.bin",
+        parent[0],parent[1],parent[2],parent[3],parent[4],parent[5],parent[6],parent[7],
+        parent[8],parent[9],parent[10],parent[11],parent[12],parent[13],parent[14],parent[15],
+        parent[16],parent[17],parent[18],parent[19],parent[20],parent[21],parent[22],parent[23],
+        parent[24],parent[25],parent[26],parent[27],parent[28],parent[29],parent[30],parent[31]);
+    /* Try disk cache */
+    FILE *fc = fopen(path, "rb");
+    if (fc) {
+        u32 cnt = 0;
+        if (fread(&cnt, 4, 1, fc) == 1) {
+            u32 got = cnt < cap ? cnt : cap;
+            for (u32 i = 0; i < got; i++)
+                if (fread(out[i], 1, 32, fc) != 32) { cnt = i; break; }
+            fclose(fc);
+            return cnt;
+        }
+        fclose(fc);
+    }
+    /* Network fetch */
+    u8 st, *r; u32 n, cnt = 0;
     send_op(5, parent, 32);
     r = recv_frame(&st, &n);
+    u32 total = 0;
     if (!st && n >= 4) {
-        cnt = ((u32)r[0] << 24) | ((u32)r[1] << 16) | ((u32)r[2] << 8) | r[3];
-        if (cnt > (n - 4) / 40) cnt = (n - 4) / 40;
-        got = cnt < cap ? cnt : cap;
-        for (u32 i = 0; i < got; i++) memcpy(out[i], r + 4 + i * 40, 32);
+        cnt = ((u32)r[0]<<24)|((u32)r[1]<<16)|((u32)r[2]<<8)|r[3];
+        if (cnt > (n-4)/40) cnt = (n-4)/40;
+        total = cnt < 256 ? cnt : 256;
+        u32 got = cnt < cap ? cnt : cap;
+        for (u32 i = 0; i < got; i++) memcpy(out[i], r+4+i*40, 32);
+    }
+    /* Save to cache (before freeing r) */
+    fc = fopen(path, "wb");
+    if (fc) {
+        fwrite(&cnt, 4, 1, fc);
+        for (u32 i = 0; i < total; i++)
+            fwrite(r+4+i*40, 1, 32, fc);
+        fclose(fc);
     }
     free(r);
     return cnt;

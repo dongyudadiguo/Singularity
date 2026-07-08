@@ -30,6 +30,9 @@ extern __declspec(dllimport) void cvm_edge(const H parent, const H child);
 typedef struct { H token; char name[96]; int tag; } RegEntry;
 typedef struct { H key; float x, y; int used; } View;
 
+#define MAX_NC 4096
+typedef struct { H tok; char nm[96]; } NCEntry;
+
 typedef struct {
     int ready;
     H registry_key;
@@ -50,6 +53,16 @@ typedef struct {
     u8 copy[MAX_COPY];
     u32 copy_len;
     int dirty;
+    /* Context menu */
+    int menu_active;
+    int menu_view;
+    u32 menu_off;
+    H menu_token;
+    u32 menu_psize;
+    float menu_mx, menu_my;
+    /* Name cache */
+    NCEntry nc[MAX_NC];
+    u32 nc_count;
 } Editor;
 
 static Editor E;
@@ -65,7 +78,28 @@ static void hex8(const H h, char *out){ static const char x[]="0123456789abcdef"
 
 static const char *name_for(const H token) {
     for (u32 i=0;i<E.reg_count;i++) if (!E.reg[i].tag && key_same(E.reg[i].token, token)) return E.reg[i].name;
+    for (u32 i=0;i<E.nc_count;i++) if (key_same(E.nc[i].tok, token)) return E.nc[i].nm;
     static char tmp[16]; hex8(token, tmp); return tmp;
+}
+static void nc_add(const H tok, const char *nm) {
+    if (!nm||!nm[0]||E.nc_count>=MAX_NC) return;
+    for (u32 i=0;i<E.nc_count;i++) if (key_same(E.nc[i].tok,tok)) return;
+    memcpy(E.nc[E.nc_count].tok,tok,32);
+    strncpy(E.nc[E.nc_count].nm,nm,95); E.nc[E.nc_count].nm[95]=0;
+    E.nc_count++;
+}
+static void nc_save(void) {
+    FILE *f=fopen("name_cache.bin","wb"); if(!f) return;
+    fwrite(&E.nc_count,4,1,f);
+    fwrite(E.nc,sizeof(NCEntry),E.nc_count,f);
+    fclose(f);
+}
+static void nc_load(void) {
+    FILE *f=fopen("name_cache.bin","rb"); if(!f) return;
+    if(fread(&E.nc_count,4,1,f)!=1){fclose(f);return;}
+    if(E.nc_count>MAX_NC) E.nc_count=MAX_NC;
+    fread(E.nc,sizeof(NCEntry),E.nc_count,f);
+    fclose(f);
 }
 
 static void append_reg(const H token, const char *name, int tag) {
@@ -122,6 +156,11 @@ __declspec(dllexport) int editor_state_init(const H current_key, const H registr
     E.views[0].y = 0;
     E.view_count = 1;
     load_registry_rec(registry_key, 0);
+    nc_load();
+    for(u32 i=0;i<E.reg_count;i++)
+        if(!E.reg[i].tag && E.reg[i].name[0] && E.reg[i].name[0]!='?')
+            nc_add(E.reg[i].token, E.reg[i].name);
+    nc_save();
     E.ready = 1;
     return 1;
 }
@@ -241,14 +280,14 @@ static void draw_payload_summary(u8 *p, u32 n, float x, float y) {
     dxgfx_draw_text((int)x,(int)y,0xff7cc6ff,18.0f,buf,(u32)strlen(buf));
 }
 
-static void draw_view(u32 vi, float mwx, float mwy, int mouse_pressed) {
+static void draw_view(u32 vi, float mwx, float mwy, int mouse_pressed, int cx, int cy) {
     load_view(vi);
     u8 *b=cvm_cached_base(); u32 len=cvm_cached_len();
     float x=E.views[vi].x, y=E.views[vi].y;
     char title[160], hx[16]; hex8(E.views[vi].key,hx);
     snprintf(title,sizeof(title),"[%u] %s",vi,hx);
     dxgfx_draw_text((int)x,(int)(y-26),0xffcfcfcf,18.0f,title,(u32)strlen(title));
-    u32 off=0; float cy=y;
+    u32 off=0; float row_y=y;
     while (off+32<=len) {
         if (zero32(b+off)) break;
         if (!valid_off(b,len,off)) break;
@@ -256,16 +295,24 @@ static void draw_view(u32 vi, float mwx, float mwy, int mouse_pressed) {
         int selected=(vi==E.active_view && off==E.point_off);
         if (mwx>=x && mwx<=x+520 && mwy>=cy && mwy<=cy+22) {
             if (mouse_pressed & 1) { E.active_view=vi; E.point_off=off; }
+            if ((mouse_pressed & 2) && !E.menu_active) {
+                u32 ps = *(u32*)(b+off+32);
+                if (ps >= 32) {
+                    E.menu_active=1; E.menu_view=vi; E.menu_off=off;
+                    memcpy(E.menu_token, b+off+36, 32); E.menu_psize=ps;
+                }
+            }
         }
-        if (selected) dxgfx_draw_rect(x-8,cy-2,520,22,0xff3f4d5a,1,1);
-        dxgfx_draw_text((int)x,(int)cy, selected?0xffffffff:0xffe8e8e8,18.0f,nm,(u32)strlen(nm));
-        draw_payload_summary(b+off+36, *(u32*)(b+off+32), x+180, cy);
-        cy += 22;
+        if (selected) dxgfx_draw_rect(x-8,row_y-2,520,22,0xff3f4d5a,1,1);
+        dxgfx_draw_text((int)x,(int)row_y, selected?0xffffffff:0xffe8e8e8,18.0f,nm,(u32)strlen(nm));
+        draw_payload_summary(b+off+36, *(u32*)(b+off+32), x+180, row_y);
+        row_y += 22;
         off += ins_size(b+off);
     }
     if (mwx>=x && mwx<=x+520 && mwy>=cy && mwy<=cy+22 && (mouse_pressed&1)) { E.active_view=vi; E.point_off=off; }
-    if (vi==E.active_view && E.point_off==off) dxgfx_draw_rect(x-8,cy-2,520,22,0xff3f4d5a,1,1);
-    dxgfx_draw_text((int)x,(int)cy,0xff777777,18.0f,"<end>",5);
+    if (vi==E.active_view && E.point_off==off) dxgfx_draw_rect(x-8,row_y-2,520,22,0xff3f4d5a,1,1);
+    dxgfx_draw_text((int)x,(int)row_y,0xff777777,18.0f,"<end>",5);
+    (void)cx; (void)cy;
 }
 
 static void handle_input(u8 *down, u8 *pressed, u8 *released, int *mouse, char *text, float mwx, float mwy) {
@@ -319,9 +366,31 @@ __declspec(dllexport) void run(void) {
     dxgfx_frame_begin();
     dxgfx_clear(0xff101214);
     dxgfx_set_camera(E.cam_x,E.cam_y,E.zoom);
-    for (u32 i=0;i<E.view_count;i++) draw_view(i,wm[0],wm[1],mouse[3]);
+    for (u32 i=0;i<E.view_count;i++) draw_view(i,wm[0],wm[1],mouse[3],mouse[0],mouse[1]);
     dxgfx_set_camera(640.0f,360.0f,1.0f);
     draw_hud(mouse[0], mouse[1]);
+    /* Context menu */
+    if (E.menu_active) {
+        int dismissed = 0;
+        if (pressed[VK_ESCAPE]) { E.menu_active=0; dismissed=1; }
+        if (!dismissed && (mouse[3] & 1)) {
+            float mx=(float)mouse[0], my=(float)mouse[1];
+            if (mx>=E.menu_mx && mx<=E.menu_mx+220 && my>=E.menu_my && my<=E.menu_my+24) {
+                if (E.view_count < MAX_VIEWS) {
+                    View *v=&E.views[E.view_count++]; v->used=1;
+                    memcpy(v->key, E.menu_token, 32);
+                    v->x=E.views[E.menu_view].x+360; v->y=E.views[E.menu_view].y;
+                }
+            }
+            E.menu_active=0; dismissed=1;
+        }
+        if (!dismissed) {
+            E.menu_mx=(float)mouse[0]+10; E.menu_my=(float)mouse[1]-10;
+            dxgfx_draw_rect(E.menu_mx-4,E.menu_my-4,228,32,0xcc1a1d21,1,1);
+            dxgfx_draw_rect(E.menu_mx-4,E.menu_my-4,228,32,0xff4a6080,1,0);
+            dxgfx_draw_text((int)E.menu_mx,(int)E.menu_my,0xffffffff,18.0f,"Open block in new view",22);
+        }
+    }
     dxgfx_frame_end();
     clock_t frame_end = clock();
     printf("[frame] #%d time=%lu ms views=%u active=%u\n",
