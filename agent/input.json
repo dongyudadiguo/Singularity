@@ -12,6 +12,10 @@
       {
         "role": "system",
         "content": "Proactively use Python for any task; Keep the code for tool calls minimal, unless you are creating **reusable tools**; You are called using the command: `python ae.py input.json`"
+      },
+      {
+        "role": "user",
+        "content": "当前项目在:C:\\Users\\12159\\Desktop\\Singularity\r\n服务器镜像在:C:\\Users\\12159\\Desktop\\server\r\n旧版本在:C:\\Users\\12159\\Desktop\\transition\r\n已验证ID在C:\\Users\\12159\\Desktop\\Singularity\\id.bin\r\n右键对着某个token拖动可以展开一个连线节点列表，相关的界面逻辑参考旧版本的to_dest_dev_base"
       }
     ],
     "tools": [
