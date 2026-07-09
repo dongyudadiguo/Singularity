@@ -29,7 +29,7 @@ extern __declspec(dllimport) void cvm_edge(const H parent, const H child);
 #define MAX_BLOCK (1u<<20)
 
 typedef struct { H token; char name[96]; int tag; } RegEntry;
-typedef struct { H key; float x, y; int used; } View;
+typedef struct { H key; float x, y; int used; int linked; float link_x, link_y; } View;
 
 #define MAX_NC 4096
 typedef struct { H tok; char nm[96]; } NCEntry;
@@ -61,6 +61,7 @@ typedef struct {
     H menu_token;
     u32 menu_psize;
     float menu_mx, menu_my;
+    int dragging_view;
     /* Name cache */
     NCEntry nc[MAX_NC];
     u32 nc_count;
@@ -351,6 +352,7 @@ __declspec(dllexport) int editor_state_init(const H current_key, const H registr
     memcpy(E.root_key, current_key, 32);
     memcpy(E.registry_key, registry_key, 32);
     E.zoom = 1.0f;
+    E.dragging_view = -1;
     E.views[0].used = 1;
     memcpy(E.views[0].key, current_key, 32);
     E.views[0].x = 0;
@@ -446,6 +448,28 @@ static void insert_completion(void) {
     clear_input();
 }
 
+static u32 find_or_add_view(const H key, float x, float y, int linked, float link_x, float link_y) {
+    for (u32 i=0;i<E.view_count;i++) {
+        if (E.views[i].used && key_same(E.views[i].key, key)) {
+            E.views[i].linked = linked;
+            E.views[i].link_x = link_x;
+            E.views[i].link_y = link_y;
+            return i;
+        }
+    }
+    if (E.view_count >= MAX_VIEWS) return 0xffffffffu;
+    View *v=&E.views[E.view_count];
+    memset(v,0,sizeof(*v));
+    v->used=1;
+    memcpy(v->key,key,32);
+    v->x=x;
+    v->y=y;
+    v->linked=linked;
+    v->link_x=link_x;
+    v->link_y=link_y;
+    return E.view_count++;
+}
+
 static void create_child_block(void) {
     char nm[96]; H k; u8 z[32]={0};
     if (E.input[0]) snprintf(nm,sizeof(nm),"%s",E.input); else snprintf(nm,sizeof(nm),"block%u",E.view_count);
@@ -487,21 +511,28 @@ static void draw_view(u32 vi, float mwx, float mwy, int mouse_pressed, int cx, i
     u8 *b=cvm_cached_base(); u32 len=cvm_cached_len();
     float x=E.views[vi].x, y=E.views[vi].y;
     char title[160], hx[16]; hex8(E.views[vi].key,hx);
+    if (E.views[vi].linked) dxgfx_draw_line(E.views[vi].link_x, E.views[vi].link_y, x, y, 0xff7bd88f, 2.0f);
     snprintf(title,sizeof(title),"[%u] %s",vi,hx);
     dxgfx_draw_text((int)x,(int)(y-26),0xffcfcfcf,18.0f,title,(u32)strlen(title));
+    if (mwx>=x && mwx<=x+520 && mwy>=y-28 && mwy<=y-4 && (mouse_pressed & 2)) {
+        E.active_view = vi;
+        E.dragging_view = (int)vi;
+    }
     u32 off=0; float row_y=y;
     while (off+32<=len) {
         if (zero32(b+off)) break;
         if (!valid_off(b,len,off)) break;
         const char *nm=name_for(b+off);
         int selected=(vi==E.active_view && off==E.point_off);
-        if (mwx>=x && mwx<=x+520 && mwy>=cy && mwy<=cy+22) {
+        if (mwx>=x && mwx<=x+520 && mwy>=row_y && mwy<=row_y+22) {
             if (mouse_pressed & 1) { E.active_view=vi; E.point_off=off; }
-            if ((mouse_pressed & 2) && !E.menu_active) {
-                u32 ps = *(u32*)(b+off+32);
-                if (ps >= 32) {
-                    E.menu_active=1; E.menu_view=vi; E.menu_off=off;
-                    memcpy(E.menu_token, b+off+36, 32); E.menu_psize=ps;
+            if (mouse_pressed & 2) {
+                /* Only the list header drags a list.  Right-dragging any token row
+                   enters/expands that token and drags the newly opened list. */
+                u32 ni = find_or_add_view(b+off, mwx, mwy, 1, x + 72.0f, row_y + 10.0f);
+                if (ni != 0xffffffffu) {
+                    E.active_view = ni;
+                    E.dragging_view = (int)ni;
                 }
             }
         }
@@ -511,7 +542,7 @@ static void draw_view(u32 vi, float mwx, float mwy, int mouse_pressed, int cx, i
         row_y += 22;
         off += ins_size(b+off);
     }
-    if (mwx>=x && mwx<=x+520 && mwy>=cy && mwy<=cy+22 && (mouse_pressed&1)) { E.active_view=vi; E.point_off=off; }
+    if (mwx>=x && mwx<=x+520 && mwy>=row_y && mwy<=row_y+22 && (mouse_pressed&1)) { E.active_view=vi; E.point_off=off; }
     if (vi==E.active_view && E.point_off==off) dxgfx_draw_rect(x-8,row_y-2,520,22,0xff3f4d5a,1,1);
     dxgfx_draw_text((int)x,(int)row_y,0xff777777,18.0f,"<end>",5);
     (void)cx; (void)cy;
@@ -537,7 +568,11 @@ static void handle_input(u8 *down, u8 *pressed, u8 *released, int *mouse, char *
     if (down[VK_CONTROL] && pressed['S']) { cvm_cache_flush(); E.dirty=0; }
     if (mouse[5]) { E.zoom += (float)mouse[5] * (0.1f * E.zoom); if(E.zoom<0.1f)E.zoom=0.1f; if(E.zoom>8.0f)E.zoom=8.0f; }
     if (mouse[2] & 4) { E.cam_x -= ((float)mouse[0]-E.last_mx)/E.zoom; E.cam_y -= ((float)mouse[1]-E.last_my)/E.zoom; }
-    if (mouse[2] & 2) { E.views[E.active_view].x += ((float)mouse[0]-E.last_mx)/E.zoom; E.views[E.active_view].y += ((float)mouse[1]-E.last_my)/E.zoom; }
+    if (!(mouse[2] & 2)) E.dragging_view = -1;
+    if ((mouse[2] & 2) && E.dragging_view >= 0 && (u32)E.dragging_view < E.view_count) {
+        E.views[E.dragging_view].x += ((float)mouse[0]-E.last_mx)/E.zoom;
+        E.views[E.dragging_view].y += ((float)mouse[1]-E.last_my)/E.zoom;
+    }
     E.last_mx=(float)mouse[0]; E.last_my=(float)mouse[1];
 }
 
