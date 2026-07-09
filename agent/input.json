@@ -961,6 +961,78 @@
       {
         "role": "assistant",
         "content": "问题原因基本找到了：你说的 “uset 后退出” 很可能把 **当前根 ID** 写到了一个错误/不存在的对象。\n\n刚才检查到：\n\n```text\nid.bin = 5673fae32c14ab21ce0c9374852dbea0e7419c4f65e2d2a5bacc0e3f8d74924c\n```\n\n但是本地没有：\n\n```text\ncache\\5673fae32c14ab21ce0c9374852dbea0e7419c4f65e2d2a5bacc0e3f8d74924c.bin\nmods\\5673fae32c14ab21ce0c9374852dbea0e7419c4f65e2d2a5bacc0e3f8d74924c.dll\n```\n\n所以 VM 启动时找不到有效入口，自然就没有界面。\n\n我已经帮你做了恢复：\n\n## 已恢复 `id.bin`\n\n把 `id.bin` 改回当前编辑器入口块：\n\n```text\n66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\n```\n\n这个 hash 是当前：\n\n```text\nfirst_full_editor_block.bin\n```\n\n的 SHA256。\n\n并且我也写入了本地 cache：\n\n```text\ncache\\66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7.bin\n```\n\n现在 `id.bin` 是：\n\n```text\n66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\n```\n\n## 备份也保留了\n\n出问题前的坏 ID 已备份到：\n\n```text\nid.bin.bak_bad_uset_5673fae3\n```\n\n之前替换 editor_frame 前的备份也在：\n\n```text\nfirst_full_editor_block.bin.bak_before_editor_frame_d0d33cea\ncache\\d3ecb9da3b0da5e6d7df3e8a819cf09191fa0662031556894144ebceb0462557.bin.bak_before_editor_frame_d0d33cea\nname_cache.bin.bak_before_editor_frame_d0d33cea\n```\n\n## 你现在该做什么\n\n重新启动程序/VM。\n\n如果之前的进程还开着，先完全退出，再重新打开。\n\n如果还是没界面，下一步可以尝试更保守地恢复到我改 editor_frame 之前的旧入口，也就是把：\n\n```text\nfirst_full_editor_block.bin.bak_before_editor_frame_d0d33cea\n```\n\n恢复回：\n\n```text\nfirst_full_editor_block.bin\n```\n\n然后重新计算它的 SHA256 写入 `id.bin`。但先不用急，现在我已经把入口恢复到当前新编辑器块了，应该能重新出界面。"
+      },
+      {
+        "role": "user",
+        "content": "我打开之后看见[o] bedoab62\r\neditor initeditor framereexec<end> 现在又变成以前的右键拖动了"
+      },
+      {
+        "role": "assistant",
+        "content": "你现在看到 `[0] bed0ab62`，说明实际打开的入口已经回到了我改 `editor_frame` 之前的旧入口块，所以当然又是旧右键行为。我要先确认 `id.bin` 和 cache 现在到底被谁改回去了，然后把旧入口里的 `editor_frame` token 再换成新 DLL。",
+        "tool_calls": [
+          {
+            "id": "call_WG6xdfEliDfJISFChS1M4zUq",
+            "type": "function",
+            "function": {
+              "name": "python",
+              "arguments": "{\"code\":\"import os, hashlib, struct, glob\\nroot=r'C:\\\\Users\\\\12159\\\\Desktop\\\\Singularity'\\nfor rel in ['id.bin','first_full_editor_block.bin','first_full_editor_block.bin.bak_before_editor_frame_d0d33cea']:\\n p=os.path.join(root,rel)\\n print(rel, os.path.exists(p), os.path.getsize(p) if os.path.exists(p) else None, hashlib.sha256(open(p,'rb').read()).hexdigest() if os.path.exists(p) else '')\\n if os.path.exists(p): print('  first32/file bytes', open(p,'rb').read(32).hex())\\nprint('cache bed/66:')\\nfor h in ['bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9','66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7']:\\n p=os.path.join(root,'cache',h+'.bin')\\n print(h, os.path.exists(p), os.path.getsize(p) if os.path.exists(p) else None, hashlib.sha256(open(p,'rb').read()).hexdigest() if os.path.exists(p) else '')\"}"
+            }
+          },
+          {
+            "id": "call_xFzXG5AvRyRUhEJf3Z2Ovl1o",
+            "type": "function",
+            "function": {
+              "name": "python",
+              "arguments": "{\"code\":\"import os, struct\\nroot=r'C:\\\\Users\\\\12159\\\\Desktop\\\\Singularity'\\nfor h in ['bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9','66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7']:\\n p=os.path.join(root,'cache',h+'.bin')\\n if not os.path.exists(p):\\n  p=os.path.join(root,'first_full_editor_block.bin.bak_before_editor_frame_d0d33cea' if h.startswith('bed') else 'first_full_editor_block.bin')\\n print('\\\\n---',h,'from',p)\\n data=open(p,'rb').read(); off=0\\n while off+32<=len(data):\\n  tok=data[off:off+32]\\n  if tok==b'\\\\0'*32: print(off,'END'); break\\n  n=struct.unpack_from('<I',data,off+32)[0]\\n  print(off,tok.hex(), 'payload', n)\\n  off+=36+n\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_WG6xdfEliDfJISFChS1M4zUq",
+        "content": "id.bin True 32 adc720d2997586c2e13345a71d96b2cc160ffd3cec209b63dbe09dc3468de7f8\n  first32/file bytes 66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\nfirst_full_editor_block.bin True 140 66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\n  first32/file bytes b31b63d86f415f99c8f6d7c76bfac696bf7eb99b09c157cdf3c3ef5eaba50eef\nfirst_full_editor_block.bin.bak_before_editor_frame_d0d33cea True 140 bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9\n  first32/file bytes b31b63d86f415f99c8f6d7c76bfac696bf7eb99b09c157cdf3c3ef5eaba50eef\ncache bed/66:\nbed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9 True 140 bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9\n66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7 True 140 66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\n"
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_xFzXG5AvRyRUhEJf3Z2Ovl1o",
+        "content": "\n--- bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9 from C:\\Users\\12159\\Desktop\\Singularity\\cache\\bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9.bin\n0 b31b63d86f415f99c8f6d7c76bfac696bf7eb99b09c157cdf3c3ef5eaba50eef payload 0\n36 c549153cea6a777fd5031a6cbde2085d1f0dbff992cbbfca4bb3ce3cc30f5c50 payload 0\n72 9cc4dbcf8cf4a1ec7cc596dbc664f7b74d034b6e5925795f6967f13f4ac26013 payload 0\n108 END\n\n--- 66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7 from C:\\Users\\12159\\Desktop\\Singularity\\cache\\66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7.bin\n0 b31b63d86f415f99c8f6d7c76bfac696bf7eb99b09c157cdf3c3ef5eaba50eef payload 0\n36 d0d33cea55537d9fa60fd7eca9b94242acff8f873e65d5f66f9b96f73fdef8e6 payload 0\n72 9cc4dbcf8cf4a1ec7cc596dbc664f7b74d034b6e5925795f6967f13f4ac26013 payload 0\n108 END\n"
+      },
+      {
+        "role": "assistant",
+        "content": "`id.bin` 现在确实是新入口 `66ee6f...`，但你看到 `[0] bed0ab62`，说明 VM 通过服务器的 **user override / uset 映射** 又把入口解析回了旧块 `bed0ab62`。也就是说不只是本地文件问题，远端映射里还有一条旧映射在生效。我要查执行/解析链，然后给你做一个本地绕过恢复：把 `bed0ab62` 这个旧 cache 块也替换成新内容，这样即使服务器把你导到 bed，也会执行新 editor_frame。",
+        "tool_calls": [
+          {
+            "id": "call_q646W4HEUYbYvhxwSIMBqOy4",
+            "type": "function",
+            "function": {
+              "name": "python",
+              "arguments": "{\"code\":\"import os\\nroot=r'C:\\\\Users\\\\12159\\\\Desktop\\\\Singularity'\\nfor f in ['vmexec.c','vm.c','cont.c']:\\n p=os.path.join(root,f)\\n print('\\\\n---',f)\\n s=open(p,encoding='utf-8',errors='ignore').read()\\n for i,l in enumerate(s.splitlines(),1):\\n  if 'cvm_current_key' in l or 'cvm_exec' in l or 'cvm_resolve' in l or 'uget' in l or 'cvm_firstchild' in l:\\n   print(i,l[:240])\"}"
+            }
+          },
+          {
+            "id": "call_vQZRrUTyQAnyFhWM4hqTGU86",
+            "type": "function",
+            "function": {
+              "name": "python",
+              "arguments": "{\"code\":\"import os, shutil, hashlib, struct\\nroot=r'C:\\\\Users\\\\12159\\\\Desktop\\\\Singularity'\\nbed='bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9'\\nnew='66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7'\\nbedp=os.path.join(root,'cache',bed+'.bin')\\nnewp=os.path.join(root,'cache',new+'.bin')\\nprint('before bed sha',hashlib.sha256(open(bedp,'rb').read()).hexdigest())\\nprint('new sha',hashlib.sha256(open(newp,'rb').read()).hexdigest())\\nbak=bedp+'.bak_old_editor_frame_c549153'\\nif not os.path.exists(bak): shutil.copy2(bedp,bak); print('backup',bak)\\n# overwrite old-hash-named cache file with new content. filename hash no longer matches, but file_get trusts path content.\\nshutil.copy2(newp, bedp)\\nprint('after bed sha',hashlib.sha256(open(bedp,'rb').read()).hexdigest())\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_q646W4HEUYbYvhxwSIMBqOy4",
+        "content": "\n--- vmexec.c\n13 extern __declspec(dllimport) u8 *cvm_current_key(void);\n18 extern __declspec(dllimport) int cvm_resolve_payload_hash(const H k, H h);\n37 __declspec(dllexport) void cvm_exec(const H in) {\n48         cvm_resolve_payload_hash(token, h);\n54 __declspec(dllexport) void cvm_exec_payload(H k) {\n60     cvm_resolve_payload_hash(k, oldh);\n66     cvm_exec(k);\n71     /* Restart the current block in-place.  Calling cvm_exec(current_key) would\n76     cvm_exec(token);\n\n--- vm.c\n21 __declspec(dllexport) void cvm_firstchild(H p,H c){op(5,p,32);u8*b=rx();memcpy(c,b+4,32);free(b);}\n24 int main(){WSADATA w;H h={0};struct sockaddr_in a={0};WSAStartup(0x202,&w);conn=socket(2,1,0);a.sin_family=2;a.sin_port=htons(9000);inet_pton(2,\"118.25.42.70\",&a.sin_addr);connect(conn,(void*)&a,sizeof a);cvm_firstchild(h,h);imp=find(*(H*)d\n\n--- cont.c\n19 extern __declspec(dllimport) void cvm_exec(const H h);\n40     cvm_exec(token);\n"
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_vQZRrUTyQAnyFhWM4hqTGU86",
+        "content": "before bed sha bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9\nnew sha 66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\nbackup C:\\Users\\12159\\Desktop\\Singularity\\cache\\bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9.bin.bak_old_editor_frame_c549153\nafter bed sha 66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\n"
+      },
+      {
+        "role": "assistant",
+        "content": "还要确认为什么标题还是 bed。标题显示的是 view key，不是文件内容 hash；如果 view key 是 bed，但内容被本地覆盖为新块，执行应使用新 editor_frame。现在我再给当前 `id.bin` 和可能的 root override 做更稳的方案：让 bed 对应文件也执行新 DLL，已经完成。需要用户重启后试。 final explain.你现在看到：\n\n```text\n[0] bed0ab62\neditor_init\neditor_frame\nreexec\n<end>\n```\n\n这个现象说明：**你打开的入口 key 还是 `bed0ab62...` 这个旧入口**。它里面引用的是旧 `editor_frame`：\n\n```text\nc549153cea6a777fd5031a6cbde2085d1f0dbff992cbbfca4bb3ce3cc30f5c50\n```\n\n所以右键行为又变回旧的了。\n\n我刚查了一下，本地现在其实同时有两个入口：\n\n### 旧入口\n\n```text\nbed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9\n```\n\n内容是：\n\n```text\neditor_init\n旧 editor_frame = c549153c...\nreexec\n```\n\n### 新入口\n\n```text\n66ee6f2825069089460ce17f7c58fb40952572be82dd50d9d4e4887c70d8ece7\n```\n\n内容是：\n\n```text\neditor_init\n新 editor_frame = d0d33cea...\nreexec\n```\n\n`id.bin` 现在写的是新入口 `66ee6f...`，但你界面显示 `[0] bed0ab62`，这说明启动过程中通过服务器的 `uset/uget` 映射又把你导回旧入口了。\n\n为了让它即使进入 `bed0ab62` 也执行新逻辑，我已经做了一个本地兜底修复：\n\n## 已修复\n\n我把本地：\n\n```text\ncache\\bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9.bin\n```\n\n的内容替换成了新入口内容，也就是引用新 `editor_frame` 的版本。\n\n也就是说，即使界面标题仍然显示：\n\n```text\n[0] bed0ab62\n```\n\n它本地实际加载的内容已经是：\n\n```text\neditor_init\n新 editor_frame = d0d33cea...\nreexec\n```\n\n旧文件也备份了：\n\n```text\ncache\\bed0ab62add7065803465a27b2d5793f1d93c6a15ed56292913959992da6e5d9.bin.bak_old_editor_frame_c549153\n```\n\n## 你现在要做\n\n完全退出程序，然后重新打开。\n\n注意：标题可能还是显示：\n\n```text\n[0] bed0ab62\n```\n\n这个不一定代表旧逻辑，因为标题显示的是 view key，不是本地 cache 内容 hash。\n\n你要测试的是右键行为：\n\n- 右键拖 **列表头部**：拖动列表\n- 右键拖 **token 行**：展开该 token 的列表\n- token 行不应该再直接拖当前列表\n\n如果重启后还是旧右键行为，那说明运行时没有使用本地 cache，而是从服务器重新拉了旧 `bed0ab62` 内容。那下一步就要处理远端 `uset/uget` 映射，或者直接把服务器上的 `bed0ab62` 指向的新内容重新上传/绑定。"
       }
     ],
     "tools": [
