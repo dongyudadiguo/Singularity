@@ -1,0 +1,38 @@
+{
+  "url": "https://api.deepseek.com/v1/chat/completions",
+  "headers": {
+    "Authorization": "Bearer sk-xxx",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "model": "gpt-5.5",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "Proactively use Python for any task; Keep the code for tool calls minimal, unless you are creating **reusable tools**; You are called using the command: `python ae.py input.json`"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "python",
+          "description": "Execute Python code and return stdout/stderr.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        }
+      }
+    ],
+    "parallel_tool_calls": false
+  }
+}
