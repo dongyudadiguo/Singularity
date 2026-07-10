@@ -125,13 +125,20 @@ extern "C" DXGFX_API int dxgfx_frame_end(void) {
     return SUCCEEDED(hr);
 }
 
+static int g_auto_submit = 0;
+
 static int dxgfx_auto_begin(dx_u32 argb) {
-    if (!dxgfx_frame_begin()) return 0;
+    g_auto_submit = !g_drawing;
+    if (!dxgfx_frame_begin()) { g_auto_submit = 0; return 0; }
     g_brush->SetColor(dxgfx_color(argb));
     return 1;
 }
 
-static int dxgfx_auto_end(void) { return g_drawing ? 1 : dxgfx_frame_end(); }
+static int dxgfx_auto_end(void) {
+    int submit = g_auto_submit;
+    g_auto_submit = 0;
+    return submit ? dxgfx_frame_end() : 1;
+}
 
 extern "C" DXGFX_API int dxgfx_screen_size(int out_size[2]) {
     if (!out_size || !dxgfx_init()) return 0;

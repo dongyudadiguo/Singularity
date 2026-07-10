@@ -54,6 +54,12 @@ def vote(sock, identity, parent, child):
         raise RuntimeError(f"vote failed: status={status}")
 
 
+def set_override(sock, identity, key, value):
+    status, _ = request(sock, 7, identity + key + value)
+    if status != OK:
+        raise RuntimeError(f"USET failed: status={status}")
+
+
 def identity_is_registered(identity):
     # UGET with an arbitrary key returns ERR_NF (3) for a registered identity
     # with no value, and ERR_DENY (2) for an unknown identity.
@@ -126,60 +132,77 @@ def require_native_mods(blocks):
 
 def main():
     identity = load_verified_identity()
-
     first = (ROOT / "first_block.bin").read_bytes()
-    editable = (ROOT / "editable_block.bin").read_bytes()
-    action = (ROOT / "insert_action_block.bin").read_bytes()
+    program = (ROOT / "first_program_block.bin").read_bytes()
     bootstrap = (ROOT / "first_bootstrap_block.bin").read_bytes()
 
     blocks = {
         "first_block.bin": first,
-        "editable_block.bin": editable,
-        "insert_action_block.bin": action,
+        "first_program_block.bin": program,
         "first_bootstrap_block.bin": bootstrap,
     }
     require_native_mods(blocks)
-
     first_ins = instructions(first)
-    action_ins = instructions(action)
+    program_ins = instructions(program)
     bootstrap_ins = instructions(bootstrap)
     if len(bootstrap_ins) != 1 or bootstrap_ins[0][1]:
         raise RuntimeError("first_bootstrap_block.bin must contain one payload-free bootstrap mod")
-    if len(first_ins) < 7 or len(action_ins) < 1:
-        raise RuntimeError("generic first-boot blocks are incomplete")
+    if len(first_ins) != 3 or len(first_ins[0][1]) != 32:
+        raise RuntimeError("first block must initialize and execute one logical program key")
+    program_key = first_ins[0][1]
+    if first_ins[-1] != (program_key, b""):
+        raise RuntimeError("first block does not execute its initialized program key")
+    if len(program_ins) < 6:
+        raise RuntimeError("modular first-run program is incomplete")
 
     bootstrap_token = bootstrap_ins[0][0]
-    # The first program executes the editable logical block directly and its
-    # conditional payload points at the generic insertion action block.
-    editable_key = first_ins[3][0]
-    action_key = first_ins[6][1]
-    if len(action_key) != 32:
-        raise RuntimeError("first block's conditional action key is not 32 bytes")
-
-    # Extended block_insert_payload payload starts with target logical key.
-    if len(action_ins[0][1]) < 32 or action_ins[0][1][:32] != editable_key:
-        raise RuntimeError("insert action does not target the editable block")
+    module_names = ("ui_init", "ui_registry", "ui_input", "ui_edit", "ui_render")
+    module_tokens = {}
+    for name in module_names:
+        source = ROOT / "mods_src" / f"{name}.c"
+        if not source.exists():
+            raise RuntimeError(f"missing source for {name}")
+        matches = []
+        marker = f"{name}.dll"
+        # Build output is hash-renamed, so find the token from the currently
+        # installed first/program instructions instead of filename aliases.
+        for token, _ in first_ins + program_ins:
+            dll = ROOT / "mods" / f"{token.hex()}.dll"
+            if dll.exists() and b"uistate.dll" in dll.read_bytes():
+                matches.append(token)
+        # Resolve each name through the known instruction position/use.
+    module_tokens["ui_init"] = first_ins[0][0]
+    module_tokens["ui_registry"] = first_ins[1][0]
+    module_tokens["ui_input"] = program_ins[2][0]
+    module_tokens["ui_edit"] = program_ins[3][0]
+    module_tokens["ui_render"] = program_ins[4][0]
 
     with socket.create_connection(SERVER, timeout=10) as sock:
-        editable_hash = upload(sock, editable)
-        action_hash = upload(sock, action)
+        program_hash = upload(sock, program)
         first_hash = upload(sock, first)
-
-        add_edge(sock, editable_key, editable_hash)
-        add_edge(sock, action_key, action_hash)
+        add_edge(sock, program_key, program_hash)
+        set_override(sock, identity, program_key, program_hash)
+        add_edge(sock, first_hash, first_hash)
+        set_override(sock, identity, first_hash, first_hash)
         add_edge(sock, bootstrap_token, first_hash)
-
-        # CHILDREN sorts by score and then by the latest vote sequence.  The
-        # verified vote therefore selects this generic composition without
-        # deleting the server's append-only history.
         vote(sock, identity, bootstrap_token, first_hash)
 
-    print("installed generic first boot graph")
-    print("vote accepted:   True")
+        tag = hashlib.sha256(b"#TAG").digest()
+        ui_tag = upload(sock, b"#ui")
+        add_edge(sock, tag, ui_tag)
+        for name, token in module_tokens.items():
+            dll = (ROOT / "mods" / f"{token.hex()}.dll").read_bytes()
+            if upload(sock, dll) != token:
+                raise RuntimeError(f"uploaded token mismatch for {name}")
+            name_hash = upload(sock, name.encode("ascii"))
+            add_edge(sock, ui_tag, token)
+            add_edge(sock, token, name_hash)
+
+    print("installed modular first boot")
     print("bootstrap token:", bootstrap_token.hex())
     print("first block:    ", first_hash.hex())
-    print("editable key:   ", editable_key.hex(), "->", editable_hash.hex())
-    print("action key:     ", action_key.hex(), "->", action_hash.hex())
+    print("program key:    ", program_key.hex())
+    print("program block:  ", program_hash.hex())
 
 
 if __name__ == "__main__":

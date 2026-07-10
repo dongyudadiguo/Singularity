@@ -126,6 +126,18 @@ gcc -shared mods_src/input_snapshot.c -o mods/input_snapshot.dll libcont.a libvm
 
 
 
+call build_uistate.bat
+
+gcc -shared mods_src/ui_init.c -o mods/ui_init.dll libcont.a libvmstate.a libvmstore.a libvm.a libuistate.a -lws2_32 -ladvapi32
+
+gcc -shared mods_src/ui_registry.c -o mods/ui_registry.dll libcont.a libvmstore.a libuistate.a -lws2_32 -ladvapi32
+
+gcc -shared mods_src/ui_input.c -o mods/ui_input.dll libcont.a libuistate.a libdxgfx.a -luser32
+
+gcc -shared mods_src/ui_edit.c -o mods/ui_edit.dll libcont.a libvmstore.a libvm.a libuistate.a libdxgfx.a -lws2_32 -ladvapi32 -luser32
+
+gcc -shared mods_src/ui_render.c -o mods/ui_render.dll libcont.a libvmstore.a libuistate.a libdxgfx.a -lws2_32 -ladvapi32 -luser32
+
 echo.
 
 echo === Hash rename ===
