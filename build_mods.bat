@@ -225,7 +225,9 @@ gcc -shared mods_src/block_select_stack.c -o mods/block_select_stack.dll libcont
 
 gcc -shared mods_src/views_render.c -o mods/views_render.dll libcont.a libvmstate.a libvmvar.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
 
-gcc -shared mods_src/views_open_at_row.c -o mods/views_open_at_row.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_open_at_row.c -o mods/views_open_at_row.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+
+gcc -shared mods_src/measure_text_var.c -o mods/measure_text_var.dll libcont.a libvmstack.a libvmstate.a libvmvar.a libdxgfx.a
 
 echo === Hash rename ===
 

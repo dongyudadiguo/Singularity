@@ -25,7 +25,7 @@ static const int G_W = 1280;
 static const int G_H = 720;
 
 static LRESULT CALLBACK dxgfx_wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    if (m == WM_CLOSE) { g_close = 1; ShowWindow(h, SW_HIDE); return 0; }
+    if (m == WM_CLOSE) { g_close = 1; DestroyWindow(h); return 0; }
     if (m == WM_DESTROY) { g_close = 1; return 0; }
     if (m == WM_MOUSEWHEEL) { g_wheel += GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA; return 0; }
     if (m == WM_CHAR) {
@@ -57,6 +57,18 @@ static D2D1_COLOR_F dxgfx_color(dx_u32 c) {
 static int dxgfx_init(void) {
     if (g_inited) { dxgfx_pump(); return g_rt != 0; }
     g_inited = 1;
+    /* Match mouse client pixels to D2D backing store; avoids non-1:1 pan/drag on scaled displays. */
+    HMODULE user32 = LoadLibraryA("user32.dll");
+    if (user32) {
+        typedef BOOL (WINAPI *SetDpiAwarenessContext_t)(void*);
+        SetDpiAwarenessContext_t set_ctx = (SetDpiAwarenessContext_t)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
+        if (set_ctx) set_ctx((void*)(-4)); /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */
+        else {
+            typedef BOOL (WINAPI *SetProcessDPIAware_t)(void);
+            SetProcessDPIAware_t set_aware = (SetProcessDPIAware_t)GetProcAddress(user32, "SetProcessDPIAware");
+            if (set_aware) set_aware();
+        }
+    }
 
     HINSTANCE inst = GetModuleHandleA(0);
     WNDCLASSEXA wc;
@@ -104,8 +116,12 @@ static void dxgfx_resize_target(void) {
 
 extern "C" DXGFX_API int dxgfx_frame_begin(void) {
     if (!dxgfx_init()) return 0;
-    if (!IsWindowVisible(g_hwnd) && !g_close) ShowWindow(g_hwnd, SW_SHOW);
     dxgfx_pump();
+    if (g_close) {
+        /* Window closed: stop VM busy-loop so the console host exits too. */
+        ExitProcess(0);
+    }
+    if (!IsWindowVisible(g_hwnd) && !g_close) ShowWindow(g_hwnd, SW_SHOW);
     dxgfx_resize_target();
     if (!g_drawing) { g_rt->BeginDraw(); g_drawing = 1; }
     return 1;
@@ -169,13 +185,36 @@ extern "C" DXGFX_API int dxgfx_keyboard(dx_u8 out_state[256]) {
     return 1;
 }
 
-extern "C" DXGFX_API int dxgfx_mouse(int out_state[4]) {
-    if (!out_state || !dxgfx_init()) return 0;
+static void dxgfx_rt_size(float *rw, float *rh) {
+    int csz[2] = {0, 0};
+    RECT cr;
+    if (g_hwnd && GetClientRect(g_hwnd, &cr)) {
+        csz[0] = cr.right - cr.left;
+        csz[1] = cr.bottom - cr.top;
+    }
+    if (rw) *rw = (float)(csz[0] > 0 ? csz[0] : 1280);
+    if (rh) *rh = (float)(csz[1] > 0 ? csz[1] : 720);
+}
+
+static void dxgfx_mouse_in_rt(float *mx, float *my, float *cx, float *cy) {
     POINT p;
     GetCursorPos(&p);
     ScreenToClient(g_hwnd, &p);
-    out_state[0] = (int)p.x;
-    out_state[1] = (int)p.y;
+    float rw, rh;
+    dxgfx_rt_size(&rw, &rh);
+    if (mx) *mx = (float)p.x;
+    if (my) *my = (float)p.y;
+    if (cx) *cx = rw * 0.5f;
+    if (cy) *cy = rh * 0.5f;
+}
+
+extern "C" DXGFX_API int dxgfx_mouse(int out_state[4]) {
+    if (!out_state || !dxgfx_init()) return 0;
+    float mx, my, cx, cy;
+    dxgfx_mouse_in_rt(&mx, &my, &cx, &cy);
+    (void)cx; (void)cy;
+    out_state[0] = (int)(mx + (mx >= 0 ? 0.5f : -0.5f));
+    out_state[1] = (int)(my + (my >= 0 ? 0.5f : -0.5f));
     out_state[2] = mouse_bits();
     out_state[3] = g_wheel;
     return 1;
@@ -226,23 +265,22 @@ extern "C" DXGFX_API int dxgfx_set_camera(float target_x, float target_y, float 
     return 1;
 }
 
+
+
 extern "C" DXGFX_API int dxgfx_world_mouse(float out_xy[2]) {
     if (!out_xy || !dxgfx_init()) return 0;
-    int sz[2] = {0, 0};
-    POINT p;
-    GetCursorPos(&p);
-    ScreenToClient(g_hwnd, &p);
-    dxgfx_screen_size(sz);
-    out_xy[0] = ((float)p.x - (float)sz[0] * 0.5f) / g_zoom + g_cam_x;
-    out_xy[1] = ((float)p.y - (float)sz[1] * 0.5f) / g_zoom + g_cam_y;
+    float mx, my, cx, cy;
+    dxgfx_mouse_in_rt(&mx, &my, &cx, &cy);
+    out_xy[0] = (mx - cx) / g_zoom + g_cam_x;
+    out_xy[1] = (my - cy) / g_zoom + g_cam_y;
     return 1;
 }
 
 static void world_to_screen(float x, float y, float *sx, float *sy) {
-    int sz[2] = {0, 0};
-    dxgfx_screen_size(sz);
-    *sx = (x - g_cam_x) * g_zoom + (float)sz[0] * 0.5f;
-    *sy = (y - g_cam_y) * g_zoom + (float)sz[1] * 0.5f;
+    float rw, rh;
+    dxgfx_rt_size(&rw, &rh);
+    *sx = (x - g_cam_x) * g_zoom + rw * 0.5f;
+    *sy = (y - g_cam_y) * g_zoom + rh * 0.5f;
 }
 
 extern "C" DXGFX_API int dxgfx_measure_text(float size, const char *utf8, dx_u32 len, float out_size[2]) {
@@ -323,5 +361,42 @@ extern "C" DXGFX_API int dxgfx_draw_line(float x1, float y1, float x2, float y2,
     world_to_screen(x1, y1, &sx1, &sy1);
     world_to_screen(x2, y2, &sx2, &sy2);
     g_rt->DrawLine(D2D1::Point2F(sx1, sy1), D2D1::Point2F(sx2, sy2), g_brush, stroke);
+    return dxgfx_auto_end();
+}
+
+extern "C" DXGFX_API int dxgfx_mouse_f(float out_xy[2]) {
+    if (!out_xy || !dxgfx_init()) return 0;
+    float mx, my, cx, cy;
+    dxgfx_mouse_in_rt(&mx, &my, &cx, &cy);
+    (void)cx; (void)cy;
+    out_xy[0] = mx;
+    out_xy[1] = my;
+    return 1;
+}
+
+extern "C" DXGFX_API int dxgfx_draw_text_screen(int x, int y, dx_u32 argb, float size, const char *utf8, dx_u32 len) {
+    if (!utf8) return 0;
+    if (size <= 0.0f) size = 20.0f;
+    if (!dxgfx_auto_begin(argb)) return 0;
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, 0, 0);
+    if (wlen <= 0) return dxgfx_auto_end();
+    wchar_t *ws = (wchar_t*)malloc((wlen + 1) * sizeof(wchar_t));
+    if (!ws) return dxgfx_auto_end();
+    MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, ws, wlen);
+    ws[wlen] = 0;
+    IDWriteTextFormat *fmt = 0;
+    HRESULT hr = g_dw->CreateTextFormat(L"Consolas", 0, DWRITE_FONT_WEIGHT_NORMAL,
+                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                        size, L"", &fmt);
+    if (SUCCEEDED(hr)) {
+        D2D1_SIZE_F s = g_rt->GetSize();
+        float rw, rh; dxgfx_rt_size(&rw, &rh);
+        float sx = (rw > 0.0f) ? (float)x * (s.width / rw) : (float)x;
+        float sy = (rh > 0.0f) ? (float)y * (s.height / rh) : (float)y;
+        D2D1_RECT_F r = D2D1::RectF(sx, sy, s.width, s.height);
+        g_rt->DrawText(ws, (UINT32)wlen, fmt, r, g_brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+        fmt->Release();
+    }
+    free(ws);
     return dxgfx_auto_end();
 }

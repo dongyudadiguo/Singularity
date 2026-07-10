@@ -67,6 +67,13 @@ __declspec(dllexport) void run(void) {
     u8 key[32]; memset(key,0,32);
     if (o+32<=n && !zero32(b+o)) memcpy(key,b+o,32);
     if (zero32(key)) { push(&out,4); cont(); return; }
+    if (o+36<=n) {
+        u32 pn=*(u32*)(b+o+32);
+        if (pn==32 && o+68<=n) {
+            u8 ph[32]; memcpy(ph,b+o+36,32);
+            if (!zero32(ph)) memcpy(key,ph,32);
+        }
+    }
 
     /* existing? */
     for (u32 i=0;i<t.count;i++){

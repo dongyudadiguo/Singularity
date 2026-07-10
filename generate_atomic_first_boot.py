@@ -9,10 +9,15 @@ INPUT_VAR = hashlib.sha256(b"atomic.editor.input").digest()
 CAM_X = hashlib.sha256(b"atomic.cam.x").digest()
 CAM_Y = hashlib.sha256(b"atomic.cam.y").digest()
 CAM_Z = hashlib.sha256(b"atomic.cam.z").digest()
-LAST_MX = hashlib.sha256(b"atomic.cam.last_mx").digest()
-LAST_MY = hashlib.sha256(b"atomic.cam.last_my").digest()
+GRAB_MX = hashlib.sha256(b"atomic.cam.grab_mx").digest()
+GRAB_MY = hashlib.sha256(b"atomic.cam.grab_my").digest()
+GRAB_CX = hashlib.sha256(b"atomic.cam.grab_cx").digest()
+GRAB_CY = hashlib.sha256(b"atomic.cam.grab_cy").digest()
+GRAB_VX = hashlib.sha256(b"atomic.cam.grab_vx").digest()
+GRAB_VY = hashlib.sha256(b"atomic.cam.grab_vy").digest()
+PAN_ACTIVE = hashlib.sha256(b"atomic.cam.pan_active").digest()
+DRAG_ANCHORED = hashlib.sha256(b"atomic.cam.drag_anchored").digest()
 VIEWS = hashlib.sha256(b"atomic.views.table").digest()
-
 ACTION_CORE = ("down", "up", "delete", "insert", "backspace", "clear", "save")
 
 
@@ -46,28 +51,20 @@ def make_block(items):
     return b"".join(instruction(*item) for item in items) + bytes(32)
 
 
-def u32(value):
-    return struct.pack("<I", value & 0xFFFFFFFF)
+def u32(v):
+    return struct.pack("<I", v & 0xFFFFFFFF)
 
 
-def i32(value):
-    return struct.pack("<i", int(value))
+def i32(v):
+    return struct.pack("<i", int(v))
 
 
-def f32(value):
-    return struct.pack("<f", float(value))
+def f32(v):
+    return struct.pack("<f", float(v))
 
 
 def static_text(x, y, color, size, text):
     return struct.pack("<iiIf", x, y, color, size) + text
-
-
-def stack_text(x, y, color, size, count=8):
-    return struct.pack("<iiIfI", x, y, color, size, count)
-
-
-def var_text(var_id, x, y, color, size):
-    return var_id + struct.pack("<iiIf", x, y, color, size)
 
 
 def alloc_var(t, var_id, size):
@@ -78,110 +75,143 @@ def views_op(t, op, args=b""):
     return (t["views"], VIEWS + u32(op) + args)
 
 
+def cond_action(t, key):
+    return (t["cond_payload"], key)
+
+
 def main():
     t = load_tokens()
     required = {
-        "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack", "drawtext",
-        "drawtext_stack", "drawtext_var", "const_payload", "var_set_payload",
-        "var_read_payload", "var_write_payload", "add", "and", "key_down", "key_pressed",
-        "cond", "registry_find", "registry_token_name", "text_input",
-        "string_append_var", "string_backspace_var", "string_clear_var", "block_insert_stack",
-        "block_delete", "block_flush", "jump_payload", "mouse_x", "mouse_y", "mouse_wheel",
-        "mouse_button_down", "mouse_button_pressed", "i32_to_f32", "f32_add", "f32_sub",
-        "f32_mul", "f32_div", "f32_const", "f32_clamp", "world_mouse", "drop_u32",
-        "views", "views_render", "block_select_stack", "block_offset_at_index",
+        "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack",
+        "drawtext_screen", "drawtext_var_xy_screen", "drawtext_xy_stack_screen",
+        "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
+        "and", "key_down", "key_pressed", "cond_payload", "registry_find",
+        "registry_token_name", "text_input", "string_append_var", "string_backspace_var",
+        "string_clear_var", "block_insert_stack", "block_delete", "block_flush",
+        "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down", "mouse_button_pressed",
+        "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_const", "f32_clamp",
+        "world_mouse", "drop_u32", "swap_u32", "views", "views_render",
+        "block_select_stack", "block_offset_at_index", "measure_text_var", "not",
+        "screen_size",
     }
     missing = sorted(required - t.keys())
     if missing:
-        raise RuntimeError(f"missing tokens: {', '.join(missing)}")
+        raise RuntimeError("missing tokens: " + ", ".join(missing))
 
-    action_keys = {name: hashlib.sha256(("#atomic.action." + name).encode()).digest()
-                   for name in ACTION_CORE}
-    for name in ("pan", "click", "rmb", "drag", "end_drag"):
-        action_keys[name] = hashlib.sha256(("#atomic.action." + name).encode()).digest()
+    action_keys = {n: hashlib.sha256(("#atomic.action." + n).encode()).digest() for n in ACTION_CORE}
+    for n in ("pan", "click", "rmb", "drag", "end_drag", "begin_pan", "end_pan", "begin_drag_anchor"):
+        action_keys[n] = hashlib.sha256(("#atomic.action." + n).encode()).digest()
 
     hit_args = f32(32.0) + f32(520.0) + f32(24.0) + u32(256)
 
+    # Capture pan anchors once when pan becomes active.
+    begin_pan = make_block([
+        (t["mouse_f"], b""),
+        (t["var_write_payload"], GRAB_MY),
+        (t["var_write_payload"], GRAB_MX),
+        (t["var_read_payload"], CAM_X), (t["var_write_payload"], GRAB_CX),
+        (t["var_read_payload"], CAM_Y), (t["var_write_payload"], GRAB_CY),
+        (t["const_payload"], u32(1)), (t["var_write_payload"], PAN_ACTIVE),
+    ])
+
+    end_pan = make_block([
+        (t["const_payload"], u32(0)), (t["var_write_payload"], PAN_ACTIVE),
+    ])
+
+    # Absolute pan: cam = grab_cam - (mouse - grab_mouse) / zoom
+    # Path-independent: mouse back to grab_mouse => cam back to grab_cam.
     pan = make_block([
-        (t["var_read_payload"], CAM_X),
-        (t["mouse_x"], b""), (t["i32_to_f32"], b""),
-        (t["var_read_payload"], LAST_MX), (t["f32_sub"], b""),
+        # if not pan_active: begin_pan (capture anchors)
+        (t["var_read_payload"], PAN_ACTIVE),
+        (t["not"], b""),
+        cond_action(t, action_keys["begin_pan"]),
+        # cam_x
+        (t["var_read_payload"], GRAB_CX),
+        (t["mouse_f"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_sub"], b""),
         (t["var_write_payload"], CAM_X),
-        (t["var_read_payload"], CAM_Y),
-        (t["mouse_y"], b""), (t["i32_to_f32"], b""),
-        (t["var_read_payload"], LAST_MY), (t["f32_sub"], b""),
+        # cam_y
+        (t["var_read_payload"], GRAB_CY),
+        (t["mouse_f"], b""), (t["swap_u32"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_sub"], b""),
         (t["var_write_payload"], CAM_Y),
     ])
 
-    drag = make_block([
-        (t["mouse_x"], b""), (t["i32_to_f32"], b""),
-        (t["var_read_payload"], LAST_MX), (t["f32_sub"], b""),
-        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
-        (t["mouse_y"], b""), (t["i32_to_f32"], b""),
-        (t["var_read_payload"], LAST_MY), (t["f32_sub"], b""),
-        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
-        views_op(t, 12),  # stack dx,dy
-    ])
-
-    end_drag = make_block([views_op(t, 13)])
-
-    click = make_block([
-        (t["world_mouse"], b""),
-        views_op(t, 29, hit_args),  # handled
-        (t["drop_u32"], b""),
+    begin_drag_anchor = make_block([
+        (t["mouse_f"], b""),
+        (t["var_write_payload"], GRAB_MY),
+        (t["var_write_payload"], GRAB_MX),
+        views_op(t, 32),
+        (t["var_write_payload"], GRAB_VY),
+        (t["var_write_payload"], GRAB_VX),
+        (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
     ])
 
     rmb = make_block([
         (t["world_mouse"], b""),
         views_op(t, 30, hit_args),
         (t["drop_u32"], b""),
+        # always re-anchor after rmb interaction (open/title drag)
+        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
+        (t["mouse_f"], b""),
+        (t["var_write_payload"], GRAB_MY),
+        (t["var_write_payload"], GRAB_MX),
+        views_op(t, 32),
+        (t["var_write_payload"], GRAB_VY),
+        (t["var_write_payload"], GRAB_VX),
+        (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
     ])
 
-    def select_active_block():
-        return [
-            views_op(t, 22),  # active key[32]
-            (t["block_select_stack"], b""),
-        ]
+    # Absolute drag: view = grab_view + (mouse - grab_mouse) / zoom
+    drag = make_block([
+        (t["var_read_payload"], DRAG_ANCHORED),
+        (t["not"], b""),
+        cond_action(t, action_keys["begin_drag_anchor"]),
+        (t["var_read_payload"], GRAB_VX),
+        (t["mouse_f"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
+        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
+        (t["f32_add"], b""),
+        (t["var_read_payload"], GRAB_VY),
+        (t["mouse_f"], b""), (t["swap_u32"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
+        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
+        (t["f32_add"], b""),
+        views_op(t, 33),
+    ])
 
-    def active_cursor_to_offset():
-        return [
-            views_op(t, 21),  # cursor
-            (t["block_offset_at_index"], b""),
-        ]
+    end_drag = make_block([
+        views_op(t, 13),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
+    ])
+
+    click = make_block([(t["world_mouse"], b""), views_op(t, 29, hit_args), (t["drop_u32"], b"")])
+
+    def sel():
+        return [views_op(t, 22), (t["block_select_stack"], b"")]
+
+    def cur():
+        return [views_op(t, 21), (t["block_offset_at_index"], b"")]
 
     actions = {
-        "down": make_block([
-            views_op(t, 23, i32(1)),
+        "down": make_block([views_op(t, 23, i32(1))]),
+        "up": make_block([views_op(t, 24)]),
+        "delete": make_block(sel() + cur() + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
+        "insert": make_block(sel() + cur() + [
+            (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
+            (t["block_insert_stack"], b""), (t["string_clear_var"], INPUT_VAR),
+            (t["jump_payload"], PROGRAM_KEY),
         ]),
-        "up": make_block([
-            views_op(t, 24),
-        ]),
-        "delete": make_block(
-            select_active_block() + active_cursor_to_offset() + [
-                (t["block_delete"], b""),
-                (t["jump_payload"], PROGRAM_KEY),
-            ]
-        ),
-        "insert": make_block(
-            select_active_block() + active_cursor_to_offset() + [
-                (t["var_read_payload"], INPUT_VAR),
-                (t["registry_find"], b""),
-                (t["block_insert_stack"], b""),
-                (t["string_clear_var"], INPUT_VAR),
-                (t["jump_payload"], PROGRAM_KEY),
-            ]
-        ),
         "backspace": make_block([(t["string_backspace_var"], INPUT_VAR)]),
         "clear": make_block([(t["string_clear_var"], INPUT_VAR)]),
-        "save": make_block(
-            select_active_block() + [
-                (t["block_flush"], b""),
-            ]
-        ),
+        "save": make_block(sel() + [(t["block_flush"], b"")]),
+        "begin_pan": begin_pan,
+        "end_pan": end_pan,
+        "begin_drag_anchor": begin_drag_anchor,
         "pan": pan,
         "click": click,
         "rmb": rmb,
@@ -189,106 +219,89 @@ def main():
         "end_drag": end_drag,
     }
 
-    if "not" not in t:
-        raise RuntimeError("missing not")
-
     program = [
         (t["frame_begin"], b""),
-        # seed view0 once (no-op after first time)
         views_op(t, 18, PROGRAM_KEY + f32(40.0) + f32(70.0)),
-        (t["var_read_payload"], CAM_X),
-        (t["var_read_payload"], CAM_Y),
-        (t["var_read_payload"], CAM_Z),
+        (t["var_read_payload"], CAM_X), (t["var_read_payload"], CAM_Y), (t["var_read_payload"], CAM_Z),
         (t["camera_set_stack"], b""),
         (t["frame_clear"], u32(0xff11161b)),
 
-        # MMB camera pan (uses last_* from previous frame)
-        (t["const_payload"], action_keys["pan"]),
-        (t["mouse_button_down"], u32(4)),
-        (t["cond"], b""),
+        (t["mouse_button_pressed"], u32(1)), cond_action(t, action_keys["click"]),
+        (t["mouse_button_pressed"], u32(2)), cond_action(t, action_keys["rmb"]),
 
-        # RMB view drag while held
-        (t["const_payload"], action_keys["drag"]),
-        (t["mouse_button_down"], u32(2)),
-        (t["cond"], b""),
-        # clear drag when RMB up
-        (t["const_payload"], action_keys["end_drag"]),
-        (t["mouse_button_down"], u32(2)),
-        (t["not"], b""),
-        (t["cond"], b""),
+        # MMB absolute pan while held; clear active on release
+        (t["mouse_button_down"], u32(4)), cond_action(t, action_keys["pan"]),
+        (t["mouse_button_down"], u32(4)), (t["not"], b""), cond_action(t, action_keys["end_pan"]),
 
-        # zoom
+        # RMB absolute view drag while held
+        (t["mouse_button_down"], u32(2)), cond_action(t, action_keys["drag"]),
+        (t["mouse_button_down"], u32(2)), (t["not"], b""), cond_action(t, action_keys["end_drag"]),
+
         (t["var_read_payload"], CAM_Z),
         (t["mouse_wheel"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(0.1)), (t["f32_mul"], b""),
-        (t["f32_const"], f32(1.0)), (t["f32_add"], b""),
-        (t["f32_mul"], b""),
+        (t["f32_const"], f32(1.0)), (t["f32_add"], b""), (t["f32_mul"], b""),
         (t["f32_clamp"], f32(0.15) + f32(6.0)),
         (t["var_write_payload"], CAM_Z),
 
-        (t["var_read_payload"], CAM_X),
-        (t["var_read_payload"], CAM_Y),
-        (t["var_read_payload"], CAM_Z),
+        (t["var_read_payload"], CAM_X), (t["var_read_payload"], CAM_Y), (t["var_read_payload"], CAM_Z),
         (t["camera_set_stack"], b""),
 
-        # pointer edges
-        (t["const_payload"], action_keys["click"]),
-        (t["mouse_button_pressed"], u32(1)),
-        (t["cond"], b""),
-        (t["const_payload"], action_keys["rmb"]),
-        (t["mouse_button_pressed"], u32(2)),
-        (t["cond"], b""),
-
-        # sample mouse after movement handlers
-        (t["mouse_x"], b""), (t["i32_to_f32"], b""), (t["var_write_payload"], LAST_MX),
-        (t["mouse_y"], b""), (t["i32_to_f32"], b""), (t["var_write_payload"], LAST_MY),
-
-        # draw all views in world space
         (t["views_render"], VIEWS),
 
-        # HUD screen space
-        (t["f32_const"], f32(640.0)),
-        (t["f32_const"], f32(360.0)),
-        (t["f32_const"], f32(1.0)),
-        (t["camera_set_stack"], b""),
-        (t["drawtext"], static_text(20, 16, 0xff9da7b3, 16.0,
-            b"multi-view  |  wheel zoom  MMB pan  LMB select  RMB open/drag  Ctrl+S save")),
-        (t["drawtext"], static_text(20, 48, 0xff73808c, 14.0, b"views active/count (status via table)")),
+        (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
+            b"multi-view | absolute grab pan/drag | RMB open payload-hash | Ctrl+S")),
         (t["text_input"], b""), (t["string_append_var"], INPUT_VAR),
-        (t["drawtext_var"], var_text(INPUT_VAR, 20, 668, 0xffffffff, 17.0)),
+
+        (t["screen_size"], b""), (t["i32_to_f32"], b""),
+        (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
+        (t["swap_u32"], b""), (t["drop_u32"], b""),
+        (t["f32_const"], f32(20.0)), (t["swap_u32"], b""),
+        (t["drawtext_var_xy_screen"], INPUT_VAR + struct.pack("<If", 0xffffffff, 17.0)),
+
+        (t["screen_size"], b""), (t["i32_to_f32"], b""),
+        (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
+        (t["swap_u32"], b""), (t["drop_u32"], b""),
+        (t["measure_text_var"], INPUT_VAR + f32(17.0)),
+        (t["f32_const"], f32(32.0)), (t["f32_add"], b""),
+        (t["swap_u32"], b""),
         (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
         (t["registry_token_name"], b""),
-        (t["drawtext_stack"], stack_text(210, 668, 0xff73808c, 17.0, 96)),
+        (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xff73808c, 17.0, 96)),
 
-        (t["const_payload"], action_keys["down"]), (t["key_pressed"], u32(0x28)), (t["cond"], b""),
-        (t["const_payload"], action_keys["up"]), (t["key_pressed"], u32(0x26)), (t["cond"], b""),
-        (t["const_payload"], action_keys["delete"]), (t["key_pressed"], u32(0x2e)), (t["cond"], b""),
-        (t["const_payload"], action_keys["insert"]), (t["key_pressed"], u32(0x20)), (t["cond"], b""),
-        (t["const_payload"], action_keys["insert"]), (t["key_pressed"], u32(0x09)), (t["cond"], b""),
-        (t["const_payload"], action_keys["backspace"]), (t["key_pressed"], u32(0x08)), (t["cond"], b""),
-        (t["const_payload"], action_keys["clear"]), (t["key_pressed"], u32(0x1b)), (t["cond"], b""),
-        (t["const_payload"], action_keys["save"]), (t["key_down"], u32(0x11)),
-        (t["key_pressed"], u32(ord("S"))), (t["and"], b""), (t["cond"], b""),
+        (t["key_pressed"], u32(0x28)), cond_action(t, action_keys["down"]),
+        (t["key_pressed"], u32(0x26)), cond_action(t, action_keys["up"]),
+        (t["key_pressed"], u32(0x2e)), cond_action(t, action_keys["delete"]),
+        (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["insert"]),
+        (t["key_pressed"], u32(0x09)), cond_action(t, action_keys["insert"]),
+        (t["key_pressed"], u32(0x08)), cond_action(t, action_keys["backspace"]),
+        (t["key_pressed"], u32(0x1b)), cond_action(t, action_keys["clear"]),
+        (t["key_down"], u32(0x11)), (t["key_pressed"], u32(ord("S"))), (t["and"], b""),
+        cond_action(t, action_keys["save"]),
         (t["frame_end"], b""), (t["reexec"], b""),
     ]
 
-    # Init: vars + seed view0 with program key
-    first_items = [
+    first = make_block([
         alloc_var(t, INPUT_VAR, 256),
-        alloc_var(t, CAM_X, 4),
-        alloc_var(t, CAM_Y, 4),
-        alloc_var(t, CAM_Z, 4),
-        alloc_var(t, LAST_MX, 4),
-        alloc_var(t, LAST_MY, 4),
+        alloc_var(t, CAM_X, 4), alloc_var(t, CAM_Y, 4), alloc_var(t, CAM_Z, 4),
+        alloc_var(t, GRAB_MX, 4), alloc_var(t, GRAB_MY, 4),
+        alloc_var(t, GRAB_CX, 4), alloc_var(t, GRAB_CY, 4),
+        alloc_var(t, GRAB_VX, 4), alloc_var(t, GRAB_VY, 4),
+        alloc_var(t, PAN_ACTIVE, 4), alloc_var(t, DRAG_ANCHORED, 4),
         alloc_var(t, VIEWS, 2320),
         (t["const_payload"], f32(640.0)), (t["var_write_payload"], CAM_X),
         (t["const_payload"], f32(360.0)), (t["var_write_payload"], CAM_Y),
         (t["const_payload"], f32(1.0)), (t["var_write_payload"], CAM_Z),
-        (t["const_payload"], f32(0.0)), (t["var_write_payload"], LAST_MX),
-        (t["const_payload"], f32(0.0)), (t["var_write_payload"], LAST_MY),
+        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_MX),
+        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_MY),
+        (t["const_payload"], f32(640.0)), (t["var_write_payload"], GRAB_CX),
+        (t["const_payload"], f32(360.0)), (t["var_write_payload"], GRAB_CY),
+        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_VX),
+        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_VY),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], PAN_ACTIVE),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
         (PROGRAM_KEY, b""),
-    ]
-    first = make_block(first_items)
+    ])
     program_raw = make_block(program)
     (ROOT / "first_block.bin").write_bytes(first)
     (ROOT / "first_program_block.bin").write_bytes(program_raw)
@@ -315,8 +328,7 @@ def main():
     collect(first)
     collect(program_raw)
     for name, raw in actions.items():
-        path = action_dir / f"{name}.bin"
-        path.write_bytes(raw)
+        (action_dir / f"{name}.bin").write_bytes(raw)
         collect(raw)
 
     name_by_token = {token: name for name, token in t.items()}
@@ -326,7 +338,7 @@ def main():
             continue
         name = name_by_token.get(tok)
         if name is None:
-            raise RuntimeError(f"unknown native token {tok.hex()}")
+            raise RuntimeError("unknown native token " + tok.hex())
         manifest["native"][name] = tok.hex()
     for name, raw in actions.items():
         manifest["actions"][name] = {
@@ -335,8 +347,7 @@ def main():
         }
     manifest["first_hash"] = hashlib.sha256(first).hexdigest()
     manifest["program_hash"] = hashlib.sha256(program_raw).hexdigest()
-    (ROOT / "atomic_first_boot_manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="ascii")
+    (ROOT / "atomic_first_boot_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="ascii")
     print("first", manifest["first_hash"], len(first))
     print("program", manifest["program_hash"], len(program_raw), len(program), "instructions")
     for name, value in manifest["actions"].items():

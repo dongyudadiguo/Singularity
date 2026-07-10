@@ -264,6 +264,8 @@ __declspec(dllexport) void run(void) {
                 if (t.views[i].used && same_key(t.views[i].key, key)) {
                     t.active = i;
                     t.dragging = (int)i;
+                    t.views[i].x = x;
+                    t.views[i].y = y;
                     out = i;
                     store(id, &t);
                     push(&out, 4);
@@ -490,6 +492,15 @@ __declspec(dllexport) void run(void) {
             memset(key, 0, 32);
             if (o + 32 <= nlen && !zero_key(b + o)) memcpy(key, b + o, 32);
             if (zero_key(key)) break;
+            /* cond_payload/jump_payload/exec_payload: payload is hash[32] -> open that hash */
+            if (o + 36 <= nlen) {
+                u32 pn = *(u32 *)(b + o + 32);
+                if (pn == 32 && o + 68 <= nlen) {
+                    u8 ph[32];
+                    memcpy(ph, b + o + 36, 32);
+                    if (!zero_key(ph)) memcpy(key, ph, 32);
+                }
+            }
             int found = -1;
             for (u32 j = 0; j < t.count; j++) {
                 if (t.views[j].used && same_key(t.views[j].key, key)) { found = (int)j; break; }
@@ -497,6 +508,9 @@ __declspec(dllexport) void run(void) {
             if (found >= 0) {
                 t.active = (u32)found;
                 t.dragging = found;
+                /* re-grab under cursor so drag-out continues from mouse */
+                t.views[found].x = mx;
+                t.views[found].y = my;
             } else if (t.count < VIEW_MAX) {
                 u32 ni = t.count++;
                 zero_view(&t.views[ni]);
@@ -516,6 +530,23 @@ __declspec(dllexport) void run(void) {
         }
         store(id, &t);
         push(&handled, 4);
+    }
+
+    if (op == 32) {
+        float x = 0.0f, y = 0.0f;
+        if (t.dragging >= 0 && (u32)t.dragging < t.count && t.views[t.dragging].used) {
+            x = t.views[t.dragging].x;
+            y = t.views[t.dragging].y;
+        }
+        push(&x, 4); push(&y, 4);
+    } else if (op == 33) {
+        float y = *(float *)pop(4);
+        float x = *(float *)pop(4);
+        if (t.dragging >= 0 && (u32)t.dragging < t.count && t.views[t.dragging].used) {
+            t.views[t.dragging].x = x;
+            t.views[t.dragging].y = y;
+            store(id, &t);
+        }
     }
     cont();
 }

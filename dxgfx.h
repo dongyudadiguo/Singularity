@@ -26,6 +26,8 @@ DXGFX_API int dxgfx_set_camera(float target_x, float target_y, float zoom);
 DXGFX_API int dxgfx_world_mouse(float out_xy[2]);
 DXGFX_API int dxgfx_measure_text(float size, const char *utf8, dx_u32 len, float out_size[2]);
 DXGFX_API int dxgfx_draw_text(int x, int y, dx_u32 argb, float size, const char *utf8, dx_u32 len);
+DXGFX_API int dxgfx_draw_text_screen(int x, int y, dx_u32 argb, float size, const char *utf8, dx_u32 len);
+DXGFX_API int dxgfx_mouse_f(float out_xy[2]);
 DXGFX_API int dxgfx_draw_rect(float x, float y, float w, float h, dx_u32 argb, float stroke, int fill);
 DXGFX_API int dxgfx_draw_line(float x1, float y1, float x2, float y2, dx_u32 argb, float stroke);
 
