@@ -244,13 +244,14 @@ def part_drag_xy(t):
 
 
 def part_zoom_z(t):
-    """new_z = clamp(old_z * (1 + wheel*0.08)); leave ratio=old/new on stack."""
+    """new_z = clamp(old_z * (1 + wheel_notches*0.08)); leave ratio=old/new on stack.
+    mouse_wheel pushes f32 notches (fractional high-res wheel supported)."""
     return [
         (t["var_read_payload"], CAM_Z),
         (t["dup_u32"], b""),
-        (t["mouse_wheel"], b""),
-        (t["i32_to_f32"], b""),
-        (t["f32_const"], f32(0.08)),
+        (t["mouse_wheel"], b""),  # f32 notches this frame (fractional high-res)
+        # ~8.5%/notch; fractional notches still move cam (was easy to feel as "no-op")
+        (t["f32_const"], f32(0.10)),
         (t["f32_mul"], b""),
         (t["f32_const"], f32(1.0)),
         (t["f32_add"], b""),

@@ -21,7 +21,9 @@ static int g_fmt_n = 0;
 static int g_inited = 0;
 static int g_drawing = 0;
 static int g_close = 0;
-static int g_wheel = 0;
+static int g_wheel_accum = 0; /* raw WHEEL_DELTA, messages since last snapshot */
+static int g_wheel_frame = 0; /* raw WHEEL_DELTA snapshot for this frame */
+static int g_wheel_latched = 0; /* 1 after first snapshot in current frame */
 static char g_text[64];
 static int g_text_len = 0;
 static dx_u8 g_prev_keys[256];
@@ -33,7 +35,8 @@ static const int G_H = 720;
 static LRESULT CALLBACK dxgfx_wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_CLOSE) { g_close = 1; DestroyWindow(h); return 0; }
     if (m == WM_DESTROY) { g_close = 1; return 0; }
-    if (m == WM_MOUSEWHEEL) { g_wheel += GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA; return 0; }
+    /* Accumulate raw WHEEL_DELTA units. High-res devices send |delta|<120; integer /120 would drop those as empty scrolls. */
+    if (m == WM_MOUSEWHEEL) { g_wheel_accum += (int)GET_WHEEL_DELTA_WPARAM(w); return 0; }
     if (m == WM_CHAR) {
         if (w >= 32 && w != 127 && g_text_len < (int)sizeof(g_text) - 5) {
             if (w < 0x80) g_text[g_text_len++] = (char)w;
@@ -133,6 +136,14 @@ extern "C" DXGFX_API int dxgfx_frame_begin(void) {
     if (!dxgfx_init()) return 0;
     /* One pump at frame start: latest mouse/keyboard messages before simulation. */
     dxgfx_pump();
+    /* Snapshot wheel ONCE per frame. frame_clear/auto_begin also call frame_begin
+     * while already drawing; re-snapshot would replace a real delta with 0 and
+     * kill zoom for the rest of the frame. */
+    if (!g_wheel_latched) {
+        g_wheel_frame = g_wheel_accum;
+        g_wheel_accum = 0;
+        g_wheel_latched = 1;
+    }
     if (g_close) {
         /* Window closed: stop VM busy-loop so the console host exits too. */
         ExitProcess(0);
@@ -154,9 +165,8 @@ extern "C" DXGFX_API int dxgfx_frame_end(void) {
     /* Present (IMMEDIATELY): do not wait for vsync; lower input-to-photon latency. */
     HRESULT hr = g_rt->EndDraw();
     g_drawing = 0;
-    /* Clear edge-like inputs after the frame that consumed them. */
-    g_wheel = 0;
-    /* Drain OS queue now so next frame_begin starts with fresher state. */
+    g_wheel_latched = 0; /* allow next frame_begin to snapshot again */
+    /* Drain OS queue into g_wheel_accum for the next frame snapshot. */
     dxgfx_pump();
     return SUCCEEDED(hr);
 }
@@ -235,7 +245,7 @@ extern "C" DXGFX_API int dxgfx_mouse(int out_state[4]) {
     out_state[0] = (int)(mx + (mx >= 0 ? 0.5f : -0.5f));
     out_state[1] = (int)(my + (my >= 0 ? 0.5f : -0.5f));
     out_state[2] = mouse_bits();
-    out_state[3] = g_wheel;
+    out_state[3] = g_wheel_frame;
     return 1;
 }
 
@@ -260,12 +270,12 @@ extern "C" DXGFX_API int dxgfx_input_snapshot(dx_u8 keys_down[256], dx_u8 keys_p
         mouse[2] = mb;
         mouse[3] = (mb & ~g_prev_mouse_buttons);
         mouse[4] = (~mb & g_prev_mouse_buttons) & 31;
-        mouse[5] = g_wheel;
+        mouse[5] = g_wheel_frame;
         mouse[6] = 0;
         mouse[7] = 0;
     }
     g_prev_mouse_buttons = mb;
-    /* g_wheel is cleared in dxgfx_frame_end so all peeks in a frame see the same delta. */
+    /* g_wheel_frame is raw WHEEL_DELTA snapshot for this frame; mid-frame msgs go to accum. */
     if (text) {
         int n = g_text_len;
         if (n > 63) n = 63;
@@ -417,6 +427,13 @@ extern "C" DXGFX_API int dxgfx_mouse_f(float out_xy[2]) {
     (void)cx; (void)cy;
     out_xy[0] = mx;
     out_xy[1] = my;
+    return 1;
+}
+
+/* Frame-accumulated wheel in notches (1.0 == one legacy WHEEL_DELTA). Fractional for high-res. */
+extern "C" DXGFX_API int dxgfx_mouse_wheel_f(float *out_notches) {
+    if (!out_notches || !dxgfx_init()) return 0;
+    *out_notches = (float)g_wheel_frame / (float)WHEEL_DELTA;
     return 1;
 }
 

@@ -2,11 +2,11 @@ typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
 extern __declspec(dllimport) void push(const void *p, u32 size);
 #include "../dxgfx.h"
-/* push i32 wheel delta for this call (dxgfx_mouse[3]). */
+/* push f32 wheel notches for this frame (1.0 == one legacy detent).
+ * High-res / precision trackpads produce fractional values; do not quantize to i32. */
 __declspec(dllexport) void run(void) {
-    int state[4] = {0, 0, 0, 0};
-    dxgfx_mouse(state);
-    int wheel = state[3];
-    push(&wheel, 4);
+    float notches = 0.0f;
+    dxgfx_mouse_wheel_f(&notches);
+    push(&notches, 4);
     cont();
 }
