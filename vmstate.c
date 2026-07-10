@@ -9,6 +9,10 @@ __declspec(dllexport) u8 *ptr;
 static u8 *cur_base;
 static H cur_key;
 
+/* Provided by vmstore: protect live instruction streams from LRU eviction. */
+extern __declspec(dllimport) void cvm_cache_pin_base(const u8 *base);
+extern __declspec(dllimport) void cvm_cache_unpin_base(const u8 *base);
+
 typedef struct Frame {
     u8 *base;
     u8 *ret;
@@ -26,31 +30,38 @@ __declspec(dllexport) u8 *cvm_current_key(void) { return cur_key; }
 __declspec(dllexport) void cvm_restart_current(void) { ptr = cur_base; }
 
 __declspec(dllexport) void cvm_replace_current(const H k, u8 *base) {
+    /* Drop call stack pins. */
+    for (u32 i = 0; i < frame_sp; i++) cvm_cache_unpin_base(frames[i].base);
+    if (cur_base) cvm_cache_unpin_base(cur_base);
     frame_sp = 0;
     if (k) memcpy(cur_key, k, 32);
     cur_base = base;
     ptr = base;
+    if (cur_base) cvm_cache_pin_base(cur_base);
 }
 
 __declspec(dllexport) void cvm_set_current(const H k, u8 *base) {
     /*
      * Entering a resolved block replaces the current instruction stream.
-     * Save the caller state first; ptr already points at the instruction after
-     * the token that entered this block, so it is the return point for ret.
+     * Save the caller state first. Parent stays pinned; child is pinned too.
      */
     if (cur_base && frame_sp < (u32)(sizeof(frames) / sizeof(frames[0]))) {
         frames[frame_sp].base = cur_base;
         frames[frame_sp].ret = ptr;
         memcpy(frames[frame_sp].key, cur_key, 32);
         frame_sp++;
+        /* parent already pinned from when it was entered */
     }
     if (k) memcpy(cur_key, k, 32);
     cur_base = base;
     ptr = base;
+    if (cur_base) cvm_cache_pin_base(cur_base);
 }
 
 __declspec(dllexport) int cvm_ret(void) {
     if (!frame_sp) return 0;
+    /* Leaving child block: unpin its stream. */
+    if (cur_base) cvm_cache_unpin_base(cur_base);
     frame_sp--;
     cur_base = frames[frame_sp].base;
     ptr = frames[frame_sp].ret;

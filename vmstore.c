@@ -28,7 +28,7 @@ extern __declspec(dllimport) void cvm_firstchild(H p, H c);
 static H id;
 
 /* Multi-entry LRU cache */
-#define CACHE_SLOTS 8
+#define CACHE_SLOTS 32
 
 typedef struct {
     H key;
@@ -36,6 +36,7 @@ typedef struct {
     u8 data[1<<20];
     u32 len;
     int on;
+    int pin;   /* >0: live execution frame — do not LRU-evict */
     u32 lru;
 } CacheSlot;
 
@@ -45,16 +46,17 @@ static u32 lru_counter = 0;
 
 /* Networking helpers */
 
-static void readn_sock(SOCKET s, void *b, u32 n) {
+static int readn_sock(SOCKET s, void *b, u32 n) {
     u32 g = 0;
     while (g < n) {
         int r = recv(s, (char*)b + g, n - g, 0);
-        if (r < 1) exit(1);
+        if (r < 1) return 0;
         g += r;
     }
+    return 1;
 }
 
-static void readn(void *b, u32 n) { readn_sock(conn, b, n); }
+static int readn(void *b, u32 n) { return readn_sock(conn, b, n); }
 
 static void send_op_sock(SOCKET s, u8 op, const void *body, u32 len) {
     u8 h[5] = {op, len>>24, len>>16, len>>8, len};
@@ -66,11 +68,12 @@ static void send_op(u8 op, const void *body, u32 len) { send_op_sock(conn, op, b
 
 static u8 *recv_frame_sock(SOCKET s, u8 *st, u32 *n) {
     u8 h[5];
-    readn_sock(s, h, 5);
+    if (!readn_sock(s, h, 5)) { *st = 1; *n = 0; return (u8*)calloc(1, 1); }
     *st = h[0];
     *n = (u32)h[1]<<24 | h[2]<<16 | h[3]<<8 | h[4];
     u8 *b = malloc(*n ? *n : 1);
-    readn_sock(s, b, *n);
+    if (!b) { *st = 1; *n = 0; return (u8*)calloc(1, 1); }
+    if (*n && !readn_sock(s, b, *n)) { free(b); *st = 1; *n = 0; return (u8*)calloc(1, 1); }
     return b;
 }
 
@@ -261,18 +264,49 @@ __declspec(dllexport) void cvm_upload_async(const u8 *p, u32 n) {
     send_op(2, p, n);
 }
 
+__declspec(dllexport) void cvm_cache_pin_base(const u8 *base) {
+    if (!base) return;
+    for (int i = 0; i < CACHE_SLOTS; i++) {
+        if (slots[i].on && slots[i].data == base) {
+            slots[i].pin++;
+            return;
+        }
+    }
+}
+
+__declspec(dllexport) void cvm_cache_unpin_base(const u8 *base) {
+    if (!base) return;
+    for (int i = 0; i < CACHE_SLOTS; i++) {
+        if (slots[i].on && slots[i].data == base) {
+            if (slots[i].pin > 0) slots[i].pin--;
+            return;
+        }
+    }
+}
+
 __declspec(dllexport) void cvm_cache_load(const H k, const H h) {
     u8 *p;
     u32 n;
     int target = -1;
+    /* Prefer free slot. */
     for (int i = 0; i < CACHE_SLOTS; i++) {
         if (!slots[i].on) { target = i; break; }
     }
+    /* Else LRU among unpinned slots only — never clobber live frames. */
     if (target < 0) {
-        target = 0;
-        for (int i = 1; i < CACHE_SLOTS; i++) {
-            if (slots[i].lru < slots[target].lru) target = i;
+        int best = -1;
+        for (int i = 0; i < CACHE_SLOTS; i++) {
+            if (slots[i].pin) continue;
+            if (best < 0 || slots[i].lru < slots[best].lru) best = i;
         }
+        target = best;
+    }
+    /* All pinned: refuse to overwrite; keep primary on a hit of k if any. */
+    if (target < 0) {
+        if (cvm_cache_hit(k)) {
+            memcpy((void*)h, slots[primary_idx].hash, 32);
+        }
+        return;
     }
     memcpy(slots[target].key, k, 32);
     memcpy(slots[target].hash, h, 32);
@@ -282,6 +316,7 @@ __declspec(dllexport) void cvm_cache_load(const H k, const H h) {
     slots[target].len = n;
     free(p);
     slots[target].on = 1;
+    slots[target].pin = 0;
     slots[target].lru = ++lru_counter;
     primary_idx = target;
 }

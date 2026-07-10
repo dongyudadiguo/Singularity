@@ -132,6 +132,7 @@ def require_atomic_mods(manifest, blocks):
     allowed = {bytes.fromhex(value): name for name, value in manifest["native"].items()}
     logical = {bytes.fromhex(manifest["program_key"])}
     logical.update(bytes.fromhex(value["key"]) for value in manifest["actions"].values())
+    logical.update(bytes.fromhex(value["key"]) for value in manifest.get("modules", {}).values())
     bootstrap_tokens = {token for token, _ in instructions(blocks["first_bootstrap_block.bin"])}
     for block_name, raw in blocks.items():
         for token, _ in instructions(raw):
@@ -160,9 +161,12 @@ def main():
     bootstrap = (ROOT / "first_bootstrap_block.bin").read_bytes()
     actions = {name: (ROOT / "atomic_action_blocks" / f"{name}.bin").read_bytes()
                for name in manifest["actions"]}
+    modules = {name: (ROOT / "atomic_module_blocks" / f"{name}.bin").read_bytes()
+               for name in manifest.get("modules", {})}
     blocks = {"first_block.bin": first, "first_program_block.bin": program,
               "first_bootstrap_block.bin": bootstrap}
     blocks.update({f"atomic_action_blocks/{name}.bin": raw for name, raw in actions.items()})
+    blocks.update({f"atomic_module_blocks/{name}.bin": raw for name, raw in modules.items()})
     require_atomic_mods(manifest, blocks)
 
     if hashlib.sha256(first).hexdigest() != manifest["first_hash"]:
@@ -197,6 +201,15 @@ def main():
             action_key = bytes.fromhex(expected["key"])
             add_edge(sock, action_key, action_hash)
             set_override(sock, identity, action_key, action_hash)
+
+        for name, raw in modules.items():
+            module_hash = upload(sock, raw)
+            expected = manifest["modules"][name]
+            if module_hash.hex() != expected["hash"]:
+                raise RuntimeError(f"module hash mismatch for {name}")
+            module_key = bytes.fromhex(expected["key"])
+            add_edge(sock, module_key, module_hash)
+            set_override(sock, identity, module_key, module_hash)
 
         program_hash = upload(sock, program)
         first_hash = upload(sock, first)
@@ -233,6 +246,8 @@ def main():
     print("program block:  ", program_hash.hex())
     for name, value in manifest["actions"].items():
         print(f"action {name:6}:", value["hash"])
+    for name, value in manifest.get("modules", {}).items():
+        print(f"module {name:6}:", value["hash"])
 
 
 if __name__ == "__main__":

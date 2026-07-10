@@ -65,6 +65,13 @@ static const char *token_name(const u8 *tok) {
     return hex;
 }
 
+static float measure(float size, const char *s) {
+    if (!s || !s[0]) return 0.0f;
+    float out[2] = {0.0f, 0.0f};
+    dxgfx_measure_text(size, s, (u32)strlen(s), out);
+    return out[0];
+}
+
 static void payload_summary(const u8 *instr, char *out, u32 outn) {
     u32 pn = *(u32 *)(instr + 32);
     if (!pn) { out[0] = 0; return; }
@@ -78,6 +85,7 @@ static void payload_summary(const u8 *instr, char *out, u32 outn) {
 
 /* payload: views_var_id[32]
  * Renders every used view: parent link, title, rows, selection, <end>.
+ * Row layout is text-width based: payload summary trails the token name.
  */
 __declspec(dllexport) void run(void) {
     if (cvm_payload_size() < 32) { cont(); return; }
@@ -99,6 +107,12 @@ __declspec(dllexport) void run(void) {
         char title[80];
         snprintf(title, sizeof(title), "[%u] %02x%02x%02x%02x",
                  vi, v->key[0], v->key[1], v->key[2], v->key[3]);
+        float title_w = measure(16.0f, title);
+        if (vi == t->active) {
+            float tw = title_w + 16.0f;
+            if (tw < 72.0f) tw = 72.0f;
+            dxgfx_draw_rect(v->x - 6.0f, v->y - 30.0f, tw, 22.0f, 0xff2a333c, 1.0f, 1);
+        }
         dxgfx_draw_text((int)v->x, (int)(v->y - 28.0f), 0xff9da7b3, 16.0f, title, (u32)strlen(title));
 
         H h;
@@ -111,21 +125,35 @@ __declspec(dllexport) void run(void) {
         while (o + 36 <= n && !zero32(b + o)) {
             u32 pn = *(u32 *)(b + o + 32);
             if (o + 36 + pn > n) break;
-            int selected = (vi == t->active && row == v->cursor);
-            if (selected) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, 510.0f, 23.0f, 0xff34414d, 1.0f, 1);
             const char *nm = token_name(b + o);
-            dxgfx_draw_text((int)v->x, (int)ry, 0xffe8ecef, 17.0f, nm, (u32)strlen(nm));
+            float name_w = measure(17.0f, nm);
             char sum[100];
             payload_summary(b + o, sum, sizeof(sum));
-            if (sum[0]) dxgfx_draw_text((int)v->x + 190, (int)ry, 0xff7fb8d8, 15.0f, sum, (u32)strlen(sum));
+            float sum_w = sum[0] ? measure(15.0f, sum) : 0.0f;
+            float gap = sum[0] ? 12.0f : 0.0f;
+            float total_w = name_w + gap + sum_w + 14.0f;
+            if (total_w < 48.0f) total_w = 48.0f;
+
+            int selected = (vi == t->active && row == v->cursor);
+            if (selected) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, total_w, 23.0f, 0xff34414d, 1.0f, 1);
+
+            dxgfx_draw_text((int)v->x, (int)ry, 0xffe8ecef, 17.0f, nm, (u32)strlen(nm));
+            if (sum[0]) {
+                int px = (int)(v->x + name_w + gap);
+                dxgfx_draw_text(px, (int)ry, 0xff7fb8d8, 15.0f, sum, (u32)strlen(sum));
+            }
             ry += 24.0f;
             o += 36 + pn;
             row++;
             if (row > 256) break;
         }
-        int end_sel = (vi == t->active && row == v->cursor);
-        if (end_sel) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, 90.0f, 23.0f, 0xff34414d, 1.0f, 1);
-        dxgfx_draw_text((int)v->x, (int)ry, 0xff66717d, 16.0f, "<end>", 5);
+        {
+            float end_w = measure(16.0f, "<end>") + 14.0f;
+            if (end_w < 48.0f) end_w = 48.0f;
+            int end_sel = (vi == t->active && row == v->cursor);
+            if (end_sel) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, end_w, 23.0f, 0xff34414d, 1.0f, 1);
+            dxgfx_draw_text((int)v->x, (int)ry, 0xff66717d, 16.0f, "<end>", 5);
+        }
     }
     cont();
 }

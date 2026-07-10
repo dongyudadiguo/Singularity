@@ -1,2 +1,2 @@
 @echo off
-gcc -shared vmstate.c -o vmstate.dll -Wl,--out-implib,libvmstate.a
+gcc -shared vmstate.c -o vmstate.dll libvmstore.a -Wl,--out-implib,libvmstate.a

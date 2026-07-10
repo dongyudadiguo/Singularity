@@ -213,7 +213,7 @@ gcc -shared mods_src/camera_set_stack.c -o mods/camera_set_stack.dll libcont.a l
 gcc -shared mods_src/i32_max.c -o mods/i32_max.dll libcont.a libvmstack.a
 
 
-gcc -shared mods_src/views.c -o mods/views.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views.c -o mods/views.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
 
 gcc -shared mods_src/drawline_stack.c -o mods/drawline_stack.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
 
@@ -225,8 +225,10 @@ gcc -shared mods_src/block_select_stack.c -o mods/block_select_stack.dll libcont
 
 gcc -shared mods_src/views_render.c -o mods/views_render.dll libcont.a libvmstate.a libvmvar.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
 
-gcc -shared mods_src/views_open_at_row.c -o mods/views_open_at_row.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
-
+gcc -shared mods_src/views_open_at_row.c -o mods/views_open_at_row.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+
+
+
 gcc -shared mods_src/measure_text_var.c -o mods/measure_text_var.dll libcont.a libvmstack.a libvmstate.a libvmvar.a libdxgfx.a
 
 echo === Hash rename ===

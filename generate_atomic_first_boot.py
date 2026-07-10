@@ -18,7 +18,20 @@ GRAB_VY = hashlib.sha256(b"atomic.cam.grab_vy").digest()
 PAN_ACTIVE = hashlib.sha256(b"atomic.cam.pan_active").digest()
 DRAG_ANCHORED = hashlib.sha256(b"atomic.cam.drag_anchored").digest()
 VIEWS = hashlib.sha256(b"atomic.views.table").digest()
+
+# Library module keys (published as reusable blocks; frame inlines them to avoid
+# vmstore  cache thrash / nested-exec frame pressure during pan).
+MOD_CAMERA = hashlib.sha256(b"#atomic.mod.camera").digest()
+MOD_INPUT = hashlib.sha256(b"#atomic.mod.input").digest()
+MOD_ZOOM = hashlib.sha256(b"#atomic.mod.zoom").digest()
+MOD_HUD = hashlib.sha256(b"#atomic.mod.hud").digest()
+MOD_EDITOR = hashlib.sha256(b"#atomic.mod.editor").digest()
+
 ACTION_CORE = ("down", "up", "delete", "insert", "backspace", "clear", "save")
+ACTION_POINTER = (
+    "pan", "click", "rmb", "drag", "end_drag",
+    "begin_pan", "end_pan", "begin_drag_anchor",
+)
 
 
 def load_tokens():
@@ -79,69 +92,49 @@ def cond_action(t, key):
     return (t["cond_payload"], key)
 
 
-def main():
-    t = load_tokens()
-    required = {
-        "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack",
-        "drawtext_screen", "drawtext_var_xy_screen", "drawtext_xy_stack_screen",
-        "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
-        "and", "key_down", "key_pressed", "cond_payload", "registry_find",
-        "registry_token_name", "text_input", "string_append_var", "string_backspace_var",
-        "string_clear_var", "block_insert_stack", "block_delete", "block_flush",
-        "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down", "mouse_button_pressed",
-        "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_const", "f32_clamp",
-        "world_mouse", "drop_u32", "swap_u32", "views", "views_render",
-        "block_select_stack", "block_offset_at_index", "measure_text_var", "not",
-        "screen_size",
-    }
-    missing = sorted(required - t.keys())
-    if missing:
-        raise RuntimeError("missing tokens: " + ", ".join(missing))
+# ---------------------------------------------------------------------------
+# Modular builders (Python + published library blocks). Frame INLINES these.
+# ---------------------------------------------------------------------------
 
-    action_keys = {n: hashlib.sha256(("#atomic.action." + n).encode()).digest() for n in ACTION_CORE}
-    for n in ("pan", "click", "rmb", "drag", "end_drag", "begin_pan", "end_pan", "begin_drag_anchor"):
-        action_keys[n] = hashlib.sha256(("#atomic.action." + n).encode()).digest()
-
-    hit_args = f32(32.0) + f32(520.0) + f32(24.0) + u32(256)
-
-    # Capture pan anchors once when pan becomes active.
-    begin_pan = make_block([
+def build_begin_pan(t):
+    return [
         (t["mouse_f"], b""),
         (t["var_write_payload"], GRAB_MY),
         (t["var_write_payload"], GRAB_MX),
         (t["var_read_payload"], CAM_X), (t["var_write_payload"], GRAB_CX),
         (t["var_read_payload"], CAM_Y), (t["var_write_payload"], GRAB_CY),
         (t["const_payload"], u32(1)), (t["var_write_payload"], PAN_ACTIVE),
-    ])
+    ]
 
-    end_pan = make_block([
+
+def build_end_pan(t):
+    return [
         (t["const_payload"], u32(0)), (t["var_write_payload"], PAN_ACTIVE),
-    ])
+    ]
 
-    # Absolute pan: cam = grab_cam - (mouse - grab_mouse) / zoom
-    # Path-independent: mouse back to grab_mouse => cam back to grab_cam.
-    pan = make_block([
-        # if not pan_active: begin_pan (capture anchors)
+
+def build_pan(t, action_keys):
+    return [
         (t["var_read_payload"], PAN_ACTIVE),
         (t["not"], b""),
         cond_action(t, action_keys["begin_pan"]),
-        # cam_x
         (t["var_read_payload"], GRAB_CX),
         (t["mouse_f"], b""), (t["drop_u32"], b""),
         (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_sub"], b""),
         (t["var_write_payload"], CAM_X),
-        # cam_y
         (t["var_read_payload"], GRAB_CY),
         (t["mouse_f"], b""), (t["swap_u32"], b""), (t["drop_u32"], b""),
         (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_sub"], b""),
         (t["var_write_payload"], CAM_Y),
-    ])
+    ]
 
-    begin_drag_anchor = make_block([
+
+def build_begin_drag_anchor(t):
+    return [
         (t["mouse_f"], b""),
         (t["var_write_payload"], GRAB_MY),
         (t["var_write_payload"], GRAB_MX),
@@ -149,13 +142,15 @@ def main():
         (t["var_write_payload"], GRAB_VY),
         (t["var_write_payload"], GRAB_VX),
         (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
-    ])
+    ]
 
-    rmb = make_block([
+
+def build_rmb(t):
+    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
+    return [
         (t["world_mouse"], b""),
         views_op(t, 30, hit_args),
         (t["drop_u32"], b""),
-        # always re-anchor after rmb interaction (open/title drag)
         (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
         (t["mouse_f"], b""),
         (t["var_write_payload"], GRAB_MY),
@@ -164,10 +159,11 @@ def main():
         (t["var_write_payload"], GRAB_VY),
         (t["var_write_payload"], GRAB_VX),
         (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
-    ])
+    ]
 
-    # Absolute drag: view = grab_view + (mouse - grab_mouse) / zoom
-    drag = make_block([
+
+def build_drag(t, action_keys):
+    return [
         (t["var_read_payload"], DRAG_ANCHORED),
         (t["not"], b""),
         cond_action(t, action_keys["begin_drag_anchor"]),
@@ -182,75 +178,111 @@ def main():
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_add"], b""),
         views_op(t, 33),
-    ])
+    ]
 
-    end_drag = make_block([
+
+def build_end_drag(t):
+    return [
         views_op(t, 13),
         (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
-    ])
+    ]
 
-    click = make_block([(t["world_mouse"], b""), views_op(t, 29, hit_args), (t["drop_u32"], b"")])
 
-    def sel():
-        return [views_op(t, 22), (t["block_select_stack"], b"")]
+def build_click(t):
+    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
+    return [(t["world_mouse"], b""), views_op(t, 29, hit_args), (t["drop_u32"], b"")]
 
-    def cur():
-        return [views_op(t, 21), (t["block_offset_at_index"], b"")]
 
-    actions = {
+def sel(t):
+    return [views_op(t, 22), (t["block_select_stack"], b"")]
+
+
+def cur(t):
+    return [views_op(t, 21), (t["block_offset_at_index"], b"")]
+
+
+def build_editor_actions(t):
+    return {
         "down": make_block([views_op(t, 23, i32(1))]),
         "up": make_block([views_op(t, 24)]),
-        "delete": make_block(sel() + cur() + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
-        "insert": make_block(sel() + cur() + [
+        "delete": make_block(sel(t) + cur(t) + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
+        "insert": make_block(sel(t) + cur(t) + [
             (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
             (t["block_insert_stack"], b""), (t["string_clear_var"], INPUT_VAR),
             (t["jump_payload"], PROGRAM_KEY),
         ]),
         "backspace": make_block([(t["string_backspace_var"], INPUT_VAR)]),
         "clear": make_block([(t["string_clear_var"], INPUT_VAR)]),
-        "save": make_block(sel() + [(t["block_flush"], b"")]),
-        "begin_pan": begin_pan,
-        "end_pan": end_pan,
-        "begin_drag_anchor": begin_drag_anchor,
-        "pan": pan,
-        "click": click,
-        "rmb": rmb,
-        "drag": drag,
-        "end_drag": end_drag,
+        "save": make_block(sel(t) + [(t["block_flush"], b"")]),
     }
 
-    program = [
-        (t["frame_begin"], b""),
-        views_op(t, 18, PROGRAM_KEY + f32(40.0) + f32(70.0)),
-        (t["var_read_payload"], CAM_X), (t["var_read_payload"], CAM_Y), (t["var_read_payload"], CAM_Z),
-        (t["camera_set_stack"], b""),
-        (t["frame_clear"], u32(0xff11161b)),
 
+def mod_camera_apply(t):
+    return [
+        (t["var_read_payload"], CAM_X),
+        (t["var_read_payload"], CAM_Y),
+        (t["var_read_payload"], CAM_Z),
+        (t["camera_set_stack"], b""),
+    ]
+
+
+def mod_zoom(t):
+    """Mouse-centered zoom: factor=1+wheel*0.08, cam keeps world under cursor."""
+    return [
+        (t["var_read_payload"], CAM_Z),
+        (t["dup_u32"], b""),
+        (t["mouse_wheel"], b""),
+        (t["i32_to_f32"], b""),
+        (t["f32_const"], f32(0.08)),
+        (t["f32_mul"], b""),
+        (t["f32_const"], f32(1.0)),
+        (t["f32_add"], b""),
+        (t["f32_mul"], b""),
+        (t["f32_clamp"], f32(0.15) + f32(6.0)),
+        (t["dup_u32"], b""),
+        (t["var_write_payload"], CAM_Z),
+        (t["f32_div"], b""),  # ratio = old/new
+        (t["dup_u32"], b""),
+        # cam_x
+        (t["var_read_payload"], CAM_X),
+        (t["world_mouse"], b""),
+        (t["drop_u32"], b""),
+        (t["f32_sub"], b""),
+        (t["f32_mul"], b""),
+        (t["world_mouse"], b""),
+        (t["drop_u32"], b""),
+        (t["f32_add"], b""),
+        (t["var_write_payload"], CAM_X),
+        # cam_y
+        (t["var_read_payload"], CAM_Y),
+        (t["world_mouse"], b""),
+        (t["swap_u32"], b""),
+        (t["drop_u32"], b""),
+        (t["f32_sub"], b""),
+        (t["f32_mul"], b""),
+        (t["world_mouse"], b""),
+        (t["swap_u32"], b""),
+        (t["drop_u32"], b""),
+        (t["f32_add"], b""),
+        (t["var_write_payload"], CAM_Y),
+    ]
+
+
+def mod_input_pointer(t, action_keys):
+    return [
         (t["mouse_button_pressed"], u32(1)), cond_action(t, action_keys["click"]),
         (t["mouse_button_pressed"], u32(2)), cond_action(t, action_keys["rmb"]),
-
-        # MMB absolute pan while held; clear active on release
         (t["mouse_button_down"], u32(4)), cond_action(t, action_keys["pan"]),
         (t["mouse_button_down"], u32(4)), (t["not"], b""), cond_action(t, action_keys["end_pan"]),
-
-        # RMB absolute view drag while held
         (t["mouse_button_down"], u32(2)), cond_action(t, action_keys["drag"]),
         (t["mouse_button_down"], u32(2)), (t["not"], b""), cond_action(t, action_keys["end_drag"]),
+    ]
 
-        (t["var_read_payload"], CAM_Z),
-        (t["mouse_wheel"], b""), (t["i32_to_f32"], b""),
-        (t["f32_const"], f32(0.1)), (t["f32_mul"], b""),
-        (t["f32_const"], f32(1.0)), (t["f32_add"], b""), (t["f32_mul"], b""),
-        (t["f32_clamp"], f32(0.15) + f32(6.0)),
-        (t["var_write_payload"], CAM_Z),
 
-        (t["var_read_payload"], CAM_X), (t["var_read_payload"], CAM_Y), (t["var_read_payload"], CAM_Z),
-        (t["camera_set_stack"], b""),
-
-        (t["views_render"], VIEWS),
-
+def mod_hud(t):
+    return [
         (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
-            b"multi-view | absolute grab pan/drag | RMB open payload-hash | Ctrl+S")),
+            b"multi-view | text-width hit | mouse-zoom | modules | Ctrl+S")),
         (t["text_input"], b""), (t["string_append_var"], INPUT_VAR),
 
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
@@ -268,7 +300,11 @@ def main():
         (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
         (t["registry_token_name"], b""),
         (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xff73808c, 17.0, 96)),
+    ]
 
+
+def mod_editor_keys(t, action_keys):
+    return [
         (t["key_pressed"], u32(0x28)), cond_action(t, action_keys["down"]),
         (t["key_pressed"], u32(0x26)), cond_action(t, action_keys["up"]),
         (t["key_pressed"], u32(0x2e)), cond_action(t, action_keys["delete"]),
@@ -278,7 +314,66 @@ def main():
         (t["key_pressed"], u32(0x1b)), cond_action(t, action_keys["clear"]),
         (t["key_down"], u32(0x11)), (t["key_pressed"], u32(ord("S"))), (t["and"], b""),
         cond_action(t, action_keys["save"]),
-        (t["frame_end"], b""), (t["reexec"], b""),
+    ]
+
+
+def main():
+    t = load_tokens()
+    required = {
+        "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack",
+        "drawtext_screen", "drawtext_var_xy_screen", "drawtext_xy_stack_screen",
+        "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
+        "and", "key_down", "key_pressed", "cond_payload", "registry_find",
+        "registry_token_name", "text_input", "string_append_var", "string_backspace_var",
+        "string_clear_var", "block_insert_stack", "block_delete", "block_flush",
+        "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down", "mouse_button_pressed",
+        "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
+        "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views", "views_render",
+        "block_select_stack", "block_offset_at_index", "measure_text_var", "not",
+        "screen_size",
+    }
+    missing = sorted(required - t.keys())
+    if missing:
+        raise RuntimeError("missing tokens: " + ", ".join(missing))
+
+    action_keys = {n: hashlib.sha256(("#atomic.action." + n).encode()).digest() for n in ACTION_CORE}
+    for n in ACTION_POINTER:
+        action_keys[n] = hashlib.sha256(("#atomic.action." + n).encode()).digest()
+
+    actions = {}
+    actions.update(build_editor_actions(t))
+    actions["begin_pan"] = make_block(build_begin_pan(t))
+    actions["end_pan"] = make_block(build_end_pan(t))
+    actions["begin_drag_anchor"] = make_block(build_begin_drag_anchor(t))
+    actions["pan"] = make_block(build_pan(t, action_keys))
+    actions["click"] = make_block(build_click(t))
+    actions["rmb"] = make_block(build_rmb(t))
+    actions["drag"] = make_block(build_drag(t, action_keys))
+    actions["end_drag"] = make_block(build_end_drag(t))
+
+    # Library modules (same instruction lists) — published for reuse/swap
+    modules = {
+        "camera": (MOD_CAMERA, make_block(mod_camera_apply(t))),
+        "input": (MOD_INPUT, make_block(mod_input_pointer(t, action_keys))),
+        "zoom": (MOD_ZOOM, make_block(mod_zoom(t))),
+        "hud": (MOD_HUD, make_block(mod_hud(t))),
+        "editor": (MOD_EDITOR, make_block(mod_editor_keys(t, action_keys))),
+    }
+
+    # Frame inlines modules (stream-embedded) — no const+exec nesting.
+    program = [
+        (t["frame_begin"], b""),
+        views_op(t, 18, PROGRAM_KEY + f32(40.0) + f32(70.0)),
+        *mod_camera_apply(t),
+        (t["frame_clear"], u32(0xff11161b)),
+        *mod_input_pointer(t, action_keys),
+        *mod_zoom(t),
+        *mod_camera_apply(t),
+        (t["views_render"], VIEWS),
+        *mod_hud(t),
+        *mod_editor_keys(t, action_keys),
+        (t["frame_end"], b""),
+        (t["reexec"], b""),
     ]
 
     first = make_block([
@@ -292,12 +387,6 @@ def main():
         (t["const_payload"], f32(640.0)), (t["var_write_payload"], CAM_X),
         (t["const_payload"], f32(360.0)), (t["var_write_payload"], CAM_Y),
         (t["const_payload"], f32(1.0)), (t["var_write_payload"], CAM_Z),
-        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_MX),
-        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_MY),
-        (t["const_payload"], f32(640.0)), (t["var_write_payload"], GRAB_CX),
-        (t["const_payload"], f32(360.0)), (t["var_write_payload"], GRAB_CY),
-        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_VX),
-        (t["const_payload"], f32(0.0)), (t["var_write_payload"], GRAB_VY),
         (t["const_payload"], u32(0)), (t["var_write_payload"], PAN_ACTIVE),
         (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
         (PROGRAM_KEY, b""),
@@ -311,9 +400,16 @@ def main():
     for old in action_dir.glob("*.bin"):
         old.unlink()
 
+    module_dir = ROOT / "atomic_module_blocks"
+    module_dir.mkdir(exist_ok=True)
+    for old in module_dir.glob("*.bin"):
+        old.unlink()
+
     used = set()
     logical = {PROGRAM_KEY}
     logical.update(action_keys.values())
+    # Module keys are library-only (not instruction tokens when inlined)
+    module_keys = {key for key, _ in modules.values()}
 
     def collect(raw):
         off = 0
@@ -330,11 +426,20 @@ def main():
     for name, raw in actions.items():
         (action_dir / f"{name}.bin").write_bytes(raw)
         collect(raw)
+    for name, (key, raw) in modules.items():
+        (module_dir / f"{name}.bin").write_bytes(raw)
+        collect(raw)
 
     name_by_token = {token: name for name, token in t.items()}
-    manifest = {"program_key": PROGRAM_KEY.hex(), "native": {}, "actions": {}}
+    manifest = {
+        "program_key": PROGRAM_KEY.hex(),
+        "native": {},
+        "actions": {},
+        "modules": {},
+        "modules_inlined": True,
+    }
     for tok in used:
-        if tok in logical:
+        if tok in logical or tok in module_keys:
             continue
         name = name_by_token.get(tok)
         if name is None:
@@ -345,13 +450,22 @@ def main():
             "key": action_keys[name].hex(),
             "hash": hashlib.sha256(raw).hexdigest(),
         }
+    for name, (key, raw) in modules.items():
+        manifest["modules"][name] = {
+            "key": key.hex(),
+            "hash": hashlib.sha256(raw).hexdigest(),
+        }
     manifest["first_hash"] = hashlib.sha256(first).hexdigest()
     manifest["program_hash"] = hashlib.sha256(program_raw).hexdigest()
-    (ROOT / "atomic_first_boot_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="ascii")
+    (ROOT / "atomic_first_boot_manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="ascii"
+    )
     print("first", manifest["first_hash"], len(first))
-    print("program", manifest["program_hash"], len(program_raw), len(program), "instructions")
+    print("program", manifest["program_hash"], len(program_raw), len(program), "instructions (inlined modules)")
     for name, value in manifest["actions"].items():
-        print(name, value["hash"][:16])
+        print("action", name, value["hash"][:16])
+    for name, value in manifest["modules"].items():
+        print("module", name, value["hash"][:16], "(library)")
     print("natives", len(manifest["native"]))
 
 
