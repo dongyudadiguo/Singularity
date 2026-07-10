@@ -5,55 +5,80 @@
 - Preserve registered 32-byte `id.bin` identity beginning `5673fae3`; never replace with rejected identity beginning `66ee6f28`.
 - Worktree is dirty. `agent/input.json` is runner-managed; do not revert unrelated changes.
 - Do not modify `agent/ae.py` unless the user explicitly asks.
-- VM block format: `token[32] + payload_size[u32 LE] + payload`, ending with zero token.
-- Native mod DLL names are SHA-256 content hashes. Logical keys resolve by user override then graph child.
-- First boot must stay small general-purpose atomic mods. Never restore integrated `ui_*`, `uistate`, `editor_frame`, or `editor_init`.
+- User tests `vm.exe` manually; do not auto-launch it from agent (console popups interfere).
+- Answer the user in Chinese when they ask `用中文回答` or prefer Chinese.
 
 ## Architecture truths
 - Fixed bootstrap token: `46e3a50739f8438f9da55bed965c9448b8074cad3f11436981892b92800db6ed`.
 - Program logical key: `2c4ffa37caa880f5820f2ece9a03ea13ead353229813bd6930d395945bff7f6d`.
-- `generate_atomic_first_boot.py` builds first/program/action blocks + `atomic_first_boot_manifest.json` + local `instruction_names.bin`.
-- `install_generic_first_boot.py` validates hash-named natives, uploads DLLs/blocks, sets overrides, votes bootstrap child.
-- Token dual identity: same token may be native DLL if platform supports it, else logical block via resolve/override/firstchild.
-- Prefer stream-embedded blocks over `exec` for modularization. Use `cond` for key-triggered actions.
+- VM block format: `token[32] + payload_size[u32 LE] + payload`, ending with zero token.
+- Token dual identity: same token may be native DLL if platform supports it, else logical block via resolve/override/firstchild. Naming does not distinguish DLL vs block.
+- Modularization (user definition): first program is a thin orchestrator of multiple non-DLL logical token blocks placed bare in the stream (empty payload). Prefer bare tokens over `const+exec`. Prefer stream-embedded blocks over `exec`. Use `cond_payload` for key-triggered actions.
+- Do not use `cvm_exec_payload` from frame/program conditionals: it rewrites live payload key->content hash and can corrupt the reexecing program cache / async-write a bad override. `cond_payload` must call non-mutating `cvm_exec(token)`.
 - `var_set_payload` trap: payload `id[32] + u32` with total size exactly 36 means ALLOCATE that many zero bytes, not write 4 data bytes.
+- First boot must stay small general-purpose atomic mods. Never restore integrated `ui_*`, `uistate`, `editor_frame`, or `editor_init`.
+- Decomposability rule (user): tokens should be as editable/split as possible; specialized/integrated tokens especially need firstchild token blocks / surfaces.
 
-## Current deployed first boot
-- first_hash: `64e7f569e94ffe3f029298aecde99a35496f7802ff735c0cfc5cdc757d8a4549`
-- program_hash: `ebb875a596030676e99b94dbf4c524f93cd649ecaa6721563202b23b6bb1e7a8` (~85 instructions)
-- Actions: `down/up/delete/insert/backspace/clear/save` plus `pan/click/rmb/drag/end_drag`
-- Multi-view state var: `atomic.views.table`
-- Camera vars: `atomic.cam.x/y/z`, `atomic.cam.last_mx/my`
-- Frame behavior: ensure/seed view0 if empty; camera from vars; MMB pan; RMB drag while held and end_drag on RMB up; wheel zoom clamp 0.15..6; LMB select via views op29; RMB open/drag via views op30; `views_render` draws all views + link lines; keyboard editor actions operate on active view key/cursor.
-- Installer min instruction check lowered to 40 (multi-view frame is denser natives, fewer stream ops).
-- User asked not to auto-launch `vm.exe` from agent because console popups still interfere; user tests VM manually.
+## Current first-boot composition
+- Generator: `generate_atomic_first_boot.py`; installer: `install_generic_first_boot.py`.
+- Thin program orchestrator: bare module tokens, no exec.
+- Frame order: `frame_begin` → views ensure → `camera` → `frame_clear` → `input` → `zoom` → `camera` → `views_render` → `hud` → `editor` → `frame_end` → `reexec`.
+- Modules: `camera`, `input`, `zoom`, `hud`, `editor`.
+- Decomposed parts under `atomic_module_blocks/`:
+  - `hud` → `status` + `typein` + `match`
+  - `editor` → `nav` + `editkeys` + `savekey`
+  - `input` → `click_on` + `rmb_on` + `pan_on` + `drag_on`
+  - `pan` → ensure + `pan_x` + `pan_y`
+  - `drag` → ensure + `drag_xy`
+  - `rmb` → `rmb_open` + `begin_drag_anchor`
+  - `zoom_apply` → `zoom_z` + `zoom_x` + `zoom_y`
+- Actions still include editor core + pan/drag/click/rmb/zoom_apply.
+- Multi-view state var: `atomic.views.table`; camera vars `atomic.cam.x/y/z`; absolute grab anchors for pan/drag.
+- Zoom formula: `z' = clamp(z * (1 + notches*0.10), 0.15..6)`, mouse-centered via world mouse; only when wheel ≠ 0.
+- `instruction_names.bin` carries natural names for natives + modules + parts + facets.
 
-## New/updated atomic mods for multi-view
-- `views` multi-op table native over one var blob (init/ensure/count/active/get/set/drag/hit/pointer_lmb/pointer_rmb/open helpers).
-- `views_render` draws titles, rows, selection, parent-child lines, payload summaries.
-- Helpers: `block_select_stack`, `drawline_stack`, `drawrect_stack`, `drawtext_xy_stack`, `block_token_at_index`, `drop_bytes`, `views_open_at_row`.
-- Current tokens of note:
-- block_select_stack=c561f96338e3489e26e8e37a418922af6c9ef5e560aa6aa113231c81810f11d3
-- views=55e68aa2afd23162fd5aea76981d912a8dfd6f664ba0a59633c7aceed8431232
-- views_open_at_row=0c34e0988649dcdd1c66a3cfc1de51ee592ed87fa7bef6e2af3bb84e44f9dc3c
-- views_render=56534d338b10e311e933c5a94d986021982203b78d840741706ea6d040a87231
-- `build_mods.bat` patched to compile these.
+## Specialized native surfaces
+- Problem: RMB-open on native `views` resolved name-string firstchild / PE bytes → empty content.
+- Fix: native surfaces in `atomic_surface_blocks/`; installer sets override native token → surface definition block.
+- `views` surface: 27 bare facet tokens (`ensure`, `pointer_lmb`, `pointer_rmb`, drag/cursor ops, etc.).
+- `views_render` surface: `render_draw`.
+- Open rule in `views` / `views_open_at_row`: only hash-carriers (`cond_payload`, `jump_payload`, `exec`, `exec_payload`) open a 32-byte payload hash; ordinary natives open themselves so surface override is visible.
+- Exec still uses `find(native DLL)`; editor resolve uses override.
 
-## Agent viewer / tooling (recent)
-- User constraint: do not edit `ae.py`.
-- Viewer launches agent with `AE_RUNNER=1`, prefers `pythonw.exe`, `CREATE_NO_WINDOW`, hidden `STARTUPINFO`, stdio `DEVNULL`.
-- No-console tool children: `agent/noconsole_site/sitecustomize.py` is prepended to `PYTHONPATH` and patches `subprocess.*` / `os.system` with `CREATE_NO_WINDOW`. Verified after restart: pythonw/python/cmd/powershell/os.system tool-like spawns did not steal focus.
-- Compaction skill default is compact-and-stop: `compact_active_file` writes summary-only non-system history and, when `AE_RUNNER=1`, kills parent runner so old `ae.py` cannot auto-continue. Legacy continue path: `compact_active_file_keep_tools` / `--active-keep-tools`.
-- Viewer assistant-duplicate bug was client-side, not `input.json`: overlapping `poll()` chains plus blind `insertAdjacentHTML` append. Fixed with single-flight `schedulePoll`/`pollInFlight`, offset-safe append/overlap/resync, mid-write JSON read tolerance, and skip empty assistant body bubbles. Post-restart API/race simulation passed on port 8765.
+## Performance / latency fixes (done)
+- Removed per-HIT/MISS `printf` from `cvm_resolve_payload_hash` (main FPS killer under modular resolve).
+- Cached `find()` LoadLibrary/GetProcAddress results in `vm.c` (256-slot map, negatives cached).
+- Hashed name index in `views` / `views_render`.
+- Present: `D2D1_PRESENT_OPTIONS_IMMEDIATELY` (cut vsync input-to-photon lag).
+- Resize render target only on client size change.
+- Cache DWrite text formats by quantized size.
+- User confirmed FPS and latency OK after these.
 
-## Still missing vs reference multi-view editor (`2385b23`)
+## Wheel zoom history and critical bug fix
+- Original empty-scroll cause: `GET_WHEEL_DELTA_WPARAM(w) / 120` integer truncate dropped high-res partial notches.
+- Changed to accumulate raw WHEEL_DELTA; `mouse_wheel` pushes f32 notches via `dxgfx_mouse_wheel_f`.
+- Second empty-scroll cause: `frame_end` cleared wheel after zoom had run, discarding mid-frame deltas.
+- Introduced `g_wheel_accum` + `g_wheel_frame` snapshot.
+- **Broken “can’t scroll at all” bug:** `frame_clear` re-enters `frame_begin` while already drawing; second snapshot saw empty accum and zeroed `g_wheel_frame` before zoom.
+- **Fix applied and rebuilt:** `g_wheel_latched` — snapshot only once per frame; clear latch in `frame_end`. `dxgfx.dll` rebuilt successfully.
+- User must restart `vm.exe` to pick up `dxgfx.dll` latch fix if not already verified after restart.
+
+## Important files
+- `generate_atomic_first_boot.py`, `install_generic_first_boot.py`
+- `atomic_module_blocks/`, `atomic_action_blocks/`, `atomic_surface_blocks/`
+- `atomic_first_boot_manifest.json`, `atomic_mod_tokens.txt`, `instruction_names.bin`
+- `dxgfx.cpp` / `dxgfx.dll` (present, wheel latch, text format cache)
+- `vm.c` (find cache), `vmstore.c` (no hot-path printf, 32 cache slots, pin)
+- `mods_src/views.c`, `views_render.c`, `views_open_at_row.c`, `mouse_wheel.c`
+
+## Still missing vs reference multi-view editor
 - Alt create child block + new view
-- OEM_3/data payload insert
+- OEM_3 / data payload insert
 - Richer status HUD / completion polish
+- Verify after full `vm.exe` restart: wheel zoom works and is smooth (no empty scrolls, no dead wheel after latch fix); names; input prefix match; MMB pan stable; mouse move no list drift
 - Do not reintroduce integrated UI DLLs
 
-## Exact next task
-- Wait for user manual VM verification of multi-view (select, RMB open/drag, pan/zoom, keyboard edit).
-- Then implement Alt-child and OEM_3 data insert as atomic ops + logical action blocks.
-- Keep keyboard editor regression green; regenerate+install after program changes; restart `vm.exe` only when user requests or after they confirm popup issue is handled.
-- If further viewer work: only residual flashes would be non-Python GUI apps launched by tools; agent runner path is fixed.
+## Agent viewer / tooling notes
+- Do not edit `ae.py`.
+- Compaction default: compact-and-stop via `compact_active_file` (`--active`); kills parent runner when `AE_RUNNER=1`.
+- Legacy continue path: `compact_active_file_keep_tools` / `--active-keep-tools`.
