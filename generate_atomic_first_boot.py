@@ -30,6 +30,7 @@ ACTION_CORE = ("down", "up", "delete", "insert", "backspace", "clear", "save")
 ACTION_POINTER = (
     "pan", "click", "rmb", "drag", "end_drag",
     "begin_pan", "end_pan", "begin_drag_anchor",
+    "zoom_apply",
 )
 
 
@@ -92,8 +93,10 @@ def cond_action(t, key):
 
 
 def call_mod(t, key):
-    """Run a logical module token block (non-DLL): push key, exec."""
-    return [(t["const_payload"], key), (t["exec"], b"")]
+    """Run a logical module token block (non-DLL) by placing the token itself
+    in the instruction stream (empty payload). VM: no DLL -> resolve override
+    -> enter block; on end, cont() advances past this token. No exec needed."""
+    return [(key, b"")]
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +233,17 @@ def mod_camera_apply(t):
     ]
 
 
-def mod_zoom(t):
-    """Mouse-centered zoom: factor=1+wheel*0.08, keep world under cursor."""
+def mod_zoom(t, zoom_apply_key):
+    """Only when wheel != 0: mouse-centered zoom (avoids cam drift on mouse move)."""
+    return [
+        (t["mouse_wheel"], b""),
+        # nonzero i32 is truthy for cond_payload
+        (t["cond_payload"], zoom_apply_key),
+    ]
+
+
+def build_zoom_apply(t):
+    """factor=1+wheel*0.08; cam' = world + (cam-world)*(old/new)."""
     return [
         (t["var_read_payload"], CAM_Z),
         (t["dup_u32"], b""),
@@ -332,7 +344,7 @@ def main():
         "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
         "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views", "views_render",
         "block_select_stack", "block_offset_at_index", "measure_text_var", "not",
-        "screen_size", "exec",
+        "screen_size",
     }
     missing = sorted(required - t.keys())
     if missing:
@@ -352,17 +364,18 @@ def main():
     actions["rmb"] = make_block(build_rmb(t))
     actions["drag"] = make_block(build_drag(t, action_keys))
     actions["end_drag"] = make_block(build_end_drag(t))
+    actions["zoom_apply"] = make_block(build_zoom_apply(t))
 
     # Each module is a separate logical token block (content-addressed via override).
     modules = {
         "camera": (MOD_CAMERA, make_block(mod_camera_apply(t))),
         "input": (MOD_INPUT, make_block(mod_input_pointer(t, action_keys))),
-        "zoom": (MOD_ZOOM, make_block(mod_zoom(t))),
+        "zoom": (MOD_ZOOM, make_block(mod_zoom(t, action_keys["zoom_apply"]))),
         "hud": (MOD_HUD, make_block(mod_hud(t))),
         "editor": (MOD_EDITOR, make_block(mod_editor_keys(t, action_keys))),
     }
 
-    # Thin orchestrator: only glue + const+exec of logical module tokens.
+    # Thin orchestrator: glue + bare logical module tokens (no exec).
     program = [
         (t["frame_begin"], b""),
         views_op(t, 18, PROGRAM_KEY + f32(40.0) + f32(70.0)),
@@ -438,7 +451,7 @@ def main():
         "actions": {},
         "modules": {},
         "modules_inlined": False,
-        "composition": "const_payload+exec logical module tokens",
+        "composition": "bare logical module tokens in stream (no exec)",
     }
     for tok in used:
         if tok in logical:
@@ -464,7 +477,7 @@ def main():
     )
     print("first", manifest["first_hash"], len(first))
     print("program", manifest["program_hash"], len(program_raw), len(program),
-          "orchestrator (const+exec modules)")
+          "orchestrator (bare module tokens)")
     for name, value in manifest["actions"].items():
         print("action", name, value["hash"][:16])
     for name, value in manifest["modules"].items():

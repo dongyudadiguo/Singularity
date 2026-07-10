@@ -192,13 +192,17 @@ def main():
     module_ins_total = sum(len(instructions(raw)) for raw in modules.values())
     if manifest.get("modules") and not manifest.get("modules_inlined", False):
         # Modular composition: thin orchestrator + logical (non-DLL) module blocks.
+        # Prefer bare module tokens in the stream (no exec); accept either form.
         if len(program_ins) < 8:
             raise RuntimeError("modular frame orchestrator is unexpectedly collapsed")
         if module_ins_total < 20:
             raise RuntimeError("modular frame modules are unexpectedly collapsed")
-        exec_tok = bytes.fromhex(manifest["native"]["exec"]) if "exec" in manifest["native"] else None
-        if exec_tok is None or not any(tok == exec_tok for tok, _ in program_ins):
-            raise RuntimeError("modular frame program must exec logical module tokens")
+        module_keys = {bytes.fromhex(v["key"]) for v in manifest["modules"].values()}
+        bare = sum(1 for tok, _ in program_ins if tok in module_keys)
+        exec_tok = bytes.fromhex(manifest["native"]["exec"]) if "exec" in manifest.get("native", {}) else None
+        has_exec = exec_tok is not None and any(tok == exec_tok for tok, _ in program_ins)
+        if bare < 1 and not has_exec:
+            raise RuntimeError("modular frame must reference logical module tokens")
     elif len(program_ins) < 40:
         raise RuntimeError("atomic frame program is unexpectedly collapsed")
 
