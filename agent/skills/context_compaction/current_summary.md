@@ -39,14 +39,12 @@
 - views_render=56534d338b10e311e933c5a94d986021982203b78d840741706ea6d040a87231
 - `build_mods.bat` patched to compile these.
 
-## Agent tooling / compaction stop fix
+## Agent viewer / tooling (recent)
 - User constraint: do not edit `ae.py`.
-- Root cause of "compact then auto-continue": old `ae.py` always does another API turn after tool results.
-- Fix without editing `ae.py`:
-  - `viewer.py` starts agent with `AE_RUNNER=1` and prefers `pythonw.exe` / `CREATE_NO_WINDOW`.
-  - `skills.context_compaction.compact.compact_active_file` now writes summary-only non-system history and, when `AE_RUNNER=1`, terminates parent runner so it cannot auto-continue.
-  - Legacy keep-tools continue path remains as `compact_active_file_keep_tools` / `--active-keep-tools`.
-- Terminal flash may still appear for some tool children; user said they will test and revisit viewer later.
+- Viewer launches agent with `AE_RUNNER=1`, prefers `pythonw.exe`, `CREATE_NO_WINDOW`, hidden `STARTUPINFO`, stdio `DEVNULL`.
+- No-console tool children: `agent/noconsole_site/sitecustomize.py` is prepended to `PYTHONPATH` and patches `subprocess.*` / `os.system` with `CREATE_NO_WINDOW`. Verified after restart: pythonw/python/cmd/powershell/os.system tool-like spawns did not steal focus.
+- Compaction skill default is compact-and-stop: `compact_active_file` writes summary-only non-system history and, when `AE_RUNNER=1`, kills parent runner so old `ae.py` cannot auto-continue. Legacy continue path: `compact_active_file_keep_tools` / `--active-keep-tools`.
+- Viewer assistant-duplicate bug was client-side, not `input.json`: overlapping `poll()` chains plus blind `insertAdjacentHTML` append. Fixed with single-flight `schedulePoll`/`pollInFlight`, offset-safe append/overlap/resync, mid-write JSON read tolerance, and skip empty assistant body bubbles. Post-restart API/race simulation passed on port 8765.
 
 ## Still missing vs reference multi-view editor (`2385b23`)
 - Alt create child block + new view
@@ -58,3 +56,4 @@
 - Wait for user manual VM verification of multi-view (select, RMB open/drag, pan/zoom, keyboard edit).
 - Then implement Alt-child and OEM_3 data insert as atomic ops + logical action blocks.
 - Keep keyboard editor regression green; regenerate+install after program changes; restart `vm.exe` only when user requests or after they confirm popup issue is handled.
+- If further viewer work: only residual flashes would be non-Python GUI apps launched by tools; agent runner path is fixed.
