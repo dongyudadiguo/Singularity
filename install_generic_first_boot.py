@@ -188,7 +188,18 @@ def main():
     }
     if any(token not in allowed_init for token, _ in first_ins[:-1]):
         raise RuntimeError("first block contains unexpected non-init instructions")
-    if len(instructions(program)) < 40:
+    program_ins = instructions(program)
+    module_ins_total = sum(len(instructions(raw)) for raw in modules.values())
+    if manifest.get("modules") and not manifest.get("modules_inlined", False):
+        # Modular composition: thin orchestrator + logical (non-DLL) module blocks.
+        if len(program_ins) < 8:
+            raise RuntimeError("modular frame orchestrator is unexpectedly collapsed")
+        if module_ins_total < 20:
+            raise RuntimeError("modular frame modules are unexpectedly collapsed")
+        exec_tok = bytes.fromhex(manifest["native"]["exec"]) if "exec" in manifest["native"] else None
+        if exec_tok is None or not any(tok == exec_tok for tok, _ in program_ins):
+            raise RuntimeError("modular frame program must exec logical module tokens")
+    elif len(program_ins) < 40:
         raise RuntimeError("atomic frame program is unexpectedly collapsed")
 
     bootstrap_token = bootstrap_ins[0][0]

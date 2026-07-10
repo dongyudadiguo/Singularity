@@ -19,8 +19,7 @@ PAN_ACTIVE = hashlib.sha256(b"atomic.cam.pan_active").digest()
 DRAG_ANCHORED = hashlib.sha256(b"atomic.cam.drag_anchored").digest()
 VIEWS = hashlib.sha256(b"atomic.views.table").digest()
 
-# Library module keys (published as reusable blocks; frame inlines them to avoid
-# vmstore  cache thrash / nested-exec frame pressure during pan).
+# Logical (non-DLL) module tokens. Frame program composes them via const+exec.
 MOD_CAMERA = hashlib.sha256(b"#atomic.mod.camera").digest()
 MOD_INPUT = hashlib.sha256(b"#atomic.mod.input").digest()
 MOD_ZOOM = hashlib.sha256(b"#atomic.mod.zoom").digest()
@@ -92,8 +91,13 @@ def cond_action(t, key):
     return (t["cond_payload"], key)
 
 
+def call_mod(t, key):
+    """Run a logical module token block (non-DLL): push key, exec."""
+    return [(t["const_payload"], key), (t["exec"], b"")]
+
+
 # ---------------------------------------------------------------------------
-# Modular builders (Python + published library blocks). Frame INLINES these.
+# Module bodies (each becomes its own logical token block)
 # ---------------------------------------------------------------------------
 
 def build_begin_pan(t):
@@ -227,7 +231,7 @@ def mod_camera_apply(t):
 
 
 def mod_zoom(t):
-    """Mouse-centered zoom: factor=1+wheel*0.08, cam keeps world under cursor."""
+    """Mouse-centered zoom: factor=1+wheel*0.08, keep world under cursor."""
     return [
         (t["var_read_payload"], CAM_Z),
         (t["dup_u32"], b""),
@@ -241,9 +245,8 @@ def mod_zoom(t):
         (t["f32_clamp"], f32(0.15) + f32(6.0)),
         (t["dup_u32"], b""),
         (t["var_write_payload"], CAM_Z),
-        (t["f32_div"], b""),  # ratio = old/new
+        (t["f32_div"], b""),
         (t["dup_u32"], b""),
-        # cam_x
         (t["var_read_payload"], CAM_X),
         (t["world_mouse"], b""),
         (t["drop_u32"], b""),
@@ -253,7 +256,6 @@ def mod_zoom(t):
         (t["drop_u32"], b""),
         (t["f32_add"], b""),
         (t["var_write_payload"], CAM_X),
-        # cam_y
         (t["var_read_payload"], CAM_Y),
         (t["world_mouse"], b""),
         (t["swap_u32"], b""),
@@ -282,7 +284,7 @@ def mod_input_pointer(t, action_keys):
 def mod_hud(t):
     return [
         (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
-            b"multi-view | text-width hit | mouse-zoom | modules | Ctrl+S")),
+            b"multi-view | modular token blocks | mouse-zoom | Ctrl+S")),
         (t["text_input"], b""), (t["string_append_var"], INPUT_VAR),
 
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
@@ -330,7 +332,7 @@ def main():
         "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
         "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views", "views_render",
         "block_select_stack", "block_offset_at_index", "measure_text_var", "not",
-        "screen_size",
+        "screen_size", "exec",
     }
     missing = sorted(required - t.keys())
     if missing:
@@ -351,7 +353,7 @@ def main():
     actions["drag"] = make_block(build_drag(t, action_keys))
     actions["end_drag"] = make_block(build_end_drag(t))
 
-    # Library modules (same instruction lists) — published for reuse/swap
+    # Each module is a separate logical token block (content-addressed via override).
     modules = {
         "camera": (MOD_CAMERA, make_block(mod_camera_apply(t))),
         "input": (MOD_INPUT, make_block(mod_input_pointer(t, action_keys))),
@@ -360,18 +362,18 @@ def main():
         "editor": (MOD_EDITOR, make_block(mod_editor_keys(t, action_keys))),
     }
 
-    # Frame inlines modules (stream-embedded) — no const+exec nesting.
+    # Thin orchestrator: only glue + const+exec of logical module tokens.
     program = [
         (t["frame_begin"], b""),
         views_op(t, 18, PROGRAM_KEY + f32(40.0) + f32(70.0)),
-        *mod_camera_apply(t),
+        *call_mod(t, MOD_CAMERA),
         (t["frame_clear"], u32(0xff11161b)),
-        *mod_input_pointer(t, action_keys),
-        *mod_zoom(t),
-        *mod_camera_apply(t),
+        *call_mod(t, MOD_INPUT),
+        *call_mod(t, MOD_ZOOM),
+        *call_mod(t, MOD_CAMERA),
         (t["views_render"], VIEWS),
-        *mod_hud(t),
-        *mod_editor_keys(t, action_keys),
+        *call_mod(t, MOD_HUD),
+        *call_mod(t, MOD_EDITOR),
         (t["frame_end"], b""),
         (t["reexec"], b""),
     ]
@@ -408,8 +410,7 @@ def main():
     used = set()
     logical = {PROGRAM_KEY}
     logical.update(action_keys.values())
-    # Module keys are library-only (not instruction tokens when inlined)
-    module_keys = {key for key, _ in modules.values()}
+    logical.update(key for key, _ in modules.values())
 
     def collect(raw):
         off = 0
@@ -436,10 +437,11 @@ def main():
         "native": {},
         "actions": {},
         "modules": {},
-        "modules_inlined": True,
+        "modules_inlined": False,
+        "composition": "const_payload+exec logical module tokens",
     }
     for tok in used:
-        if tok in logical or tok in module_keys:
+        if tok in logical:
             continue
         name = name_by_token.get(tok)
         if name is None:
@@ -461,11 +463,12 @@ def main():
         json.dumps(manifest, indent=2) + "\n", encoding="ascii"
     )
     print("first", manifest["first_hash"], len(first))
-    print("program", manifest["program_hash"], len(program_raw), len(program), "instructions (inlined modules)")
+    print("program", manifest["program_hash"], len(program_raw), len(program),
+          "orchestrator (const+exec modules)")
     for name, value in manifest["actions"].items():
         print("action", name, value["hash"][:16])
     for name, value in manifest["modules"].items():
-        print("module", name, value["hash"][:16], "(library)")
+        print("module", name, value["key"][:16], "->", value["hash"][:16])
     print("natives", len(manifest["native"]))
 
 
