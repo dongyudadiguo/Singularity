@@ -112,6 +112,11 @@ def instructions(raw):
     raise ValueError("block has no zero-token terminator")
 
 
+def invalidate_children_cache(token):
+    cache = ROOT / "cache" / f"{token.hex()}_ch.bin"
+    cache.unlink(missing_ok=True)
+
+
 def require_native_mods(blocks):
     """Every directly used native token must be a normal hash-named DLL.
 
@@ -156,32 +161,29 @@ def main():
         raise RuntimeError("modular first-run program is incomplete")
 
     bootstrap_token = bootstrap_ins[0][0]
-    module_names = ("ui_init", "ui_registry", "ui_input", "ui_edit", "ui_render")
-    module_tokens = {}
-    for name in module_names:
-        source = ROOT / "mods_src" / f"{name}.c"
-        if not source.exists():
-            raise RuntimeError(f"missing source for {name}")
-        matches = []
-        marker = f"{name}.dll"
-        # Build output is hash-renamed, so find the token from the currently
-        # installed first/program instructions instead of filename aliases.
-        for token, _ in first_ins + program_ins:
-            dll = ROOT / "mods" / f"{token.hex()}.dll"
-            if dll.exists() and b"uistate.dll" in dll.read_bytes():
-                matches.append(token)
-        # Resolve each name through the known instruction position/use.
-    module_tokens["ui_init"] = first_ins[0][0]
-    module_tokens["ui_registry"] = first_ins[1][0]
-    module_tokens["ui_input"] = program_ins[2][0]
-    module_tokens["ui_edit"] = program_ins[3][0]
-    module_tokens["ui_render"] = program_ins[4][0]
+    module_tokens = {
+        "ui_init": first_ins[0][0],
+        "ui_registry": first_ins[1][0],
+        "frame_begin": program_ins[0][0],
+        "frame_clear": program_ins[1][0],
+        "ui_input": program_ins[2][0],
+        "ui_edit": program_ins[3][0],
+        "ui_render": program_ins[4][0],
+        "frame_end": program_ins[5][0],
+        "reexec": program_ins[6][0],
+    }
+    for name, token in module_tokens.items():
+        if not (ROOT / "mods" / f"{token.hex()}.dll").exists():
+            raise RuntimeError(f"missing hash-named DLL for {name}")
 
     with socket.create_connection(SERVER, timeout=10) as sock:
         program_hash = upload(sock, program)
         first_hash = upload(sock, first)
         add_edge(sock, program_key, program_hash)
         set_override(sock, identity, program_key, program_hash)
+        status, installed_program = request(sock, 8, identity + program_key)
+        if status != OK or installed_program != program_hash:
+            raise RuntimeError("program override verification failed")
         add_edge(sock, first_hash, first_hash)
         set_override(sock, identity, first_hash, first_hash)
         add_edge(sock, bootstrap_token, first_hash)
@@ -197,6 +199,11 @@ def main():
             name_hash = upload(sock, name.encode("ascii"))
             add_edge(sock, ui_tag, token)
             add_edge(sock, token, name_hash)
+
+    invalidate_children_cache(tag)
+    invalidate_children_cache(ui_tag)
+    for token in module_tokens.values():
+        invalidate_children_cache(token)
 
     print("installed modular first boot")
     print("bootstrap token:", bootstrap_token.hex())
