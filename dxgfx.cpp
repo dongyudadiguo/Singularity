@@ -11,7 +11,13 @@ static HWND g_hwnd = 0;
 static ID2D1Factory *g_d2d = 0;
 static IDWriteFactory *g_dw = 0;
 static ID2D1HwndRenderTarget *g_rt = 0;
+static UINT32 g_rt_w = 0, g_rt_h = 0;
 static ID2D1SolidColorBrush *g_brush = 0;
+/* Text formats are expensive to create; cache by rounded size. */
+#define DX_FMT_CACHE 16
+static IDWriteTextFormat *g_fmt[DX_FMT_CACHE];
+static float g_fmt_size[DX_FMT_CACHE];
+static int g_fmt_n = 0;
 static int g_inited = 0;
 static int g_drawing = 0;
 static int g_close = 0;
@@ -93,12 +99,14 @@ static int dxgfx_init(void) {
     RECT cr;
     GetClientRect(g_hwnd, &cr);
     D2D1_SIZE_U sz = D2D1::SizeU((UINT32)(cr.right - cr.left), (UINT32)(cr.bottom - cr.top));
-    D2D1_HWND_RENDER_TARGET_PROPERTIES hp = D2D1::HwndRenderTargetProperties(g_hwnd, sz, D2D1_PRESENT_OPTIONS_NONE);
+    D2D1_HWND_RENDER_TARGET_PROPERTIES hp = D2D1::HwndRenderTargetProperties(g_hwnd, sz, D2D1_PRESENT_OPTIONS_IMMEDIATELY);
     D2D1_RENDER_TARGET_PROPERTIES rp = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_HARDWARE,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE),
         0.0f, 0.0f, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_FEATURE_LEVEL_DEFAULT);
     if (FAILED(g_d2d->CreateHwndRenderTarget(rp, hp, &g_rt))) return 0;
+    g_rt_w = sz.width;
+    g_rt_h = sz.height;
     if (FAILED(g_rt->CreateSolidColorBrush(dxgfx_color(0xffffffff), &g_brush))) return 0;
     ShowWindow(g_hwnd, SW_SHOW);
     UpdateWindow(g_hwnd);
@@ -110,12 +118,20 @@ static void dxgfx_resize_target(void) {
     if (!g_hwnd || !g_rt) return;
     RECT cr;
     GetClientRect(g_hwnd, &cr);
-    D2D1_SIZE_U sz = D2D1::SizeU((UINT32)(cr.right - cr.left), (UINT32)(cr.bottom - cr.top));
-    g_rt->Resize(sz);
+    UINT32 w = (UINT32)(cr.right - cr.left);
+    UINT32 h = (UINT32)(cr.bottom - cr.top);
+    if (w == 0 || h == 0) return;
+    if (w == g_rt_w && h == g_rt_h) return;
+    D2D1_SIZE_U sz = D2D1::SizeU(w, h);
+    if (SUCCEEDED(g_rt->Resize(sz))) {
+        g_rt_w = w;
+        g_rt_h = h;
+    }
 }
 
 extern "C" DXGFX_API int dxgfx_frame_begin(void) {
     if (!dxgfx_init()) return 0;
+    /* One pump at frame start: latest mouse/keyboard messages before simulation. */
     dxgfx_pump();
     if (g_close) {
         /* Window closed: stop VM busy-loop so the console host exits too. */
@@ -135,9 +151,12 @@ extern "C" DXGFX_API int dxgfx_clear(dx_u32 argb) {
 
 extern "C" DXGFX_API int dxgfx_frame_end(void) {
     if (!g_rt || !g_drawing) return 0;
+    /* Present (IMMEDIATELY): do not wait for vsync; lower input-to-photon latency. */
     HRESULT hr = g_rt->EndDraw();
     g_drawing = 0;
+    /* Clear edge-like inputs after the frame that consumed them. */
     g_wheel = 0;
+    /* Drain OS queue now so next frame_begin starts with fresher state. */
     dxgfx_pump();
     return SUCCEEDED(hr);
 }
@@ -283,6 +302,37 @@ static void world_to_screen(float x, float y, float *sx, float *sy) {
     *sy = (y - g_cam_y) * g_zoom + rh * 0.5f;
 }
 
+static IDWriteTextFormat *dxgfx_text_format(float size) {
+    if (size <= 0.0f) size = 20.0f;
+    /* quantize to 0.25px so slight float noise reuses slots */
+    float key = (float)((int)(size * 4.0f + 0.5f)) * 0.25f;
+    if (key < 1.0f) key = 1.0f;
+    for (int i = 0; i < g_fmt_n; i++) {
+        if (g_fmt[i] && g_fmt_size[i] == key) return g_fmt[i];
+    }
+    IDWriteTextFormat *fmt = 0;
+    HRESULT hr = g_dw->CreateTextFormat(L"Consolas", 0, DWRITE_FONT_WEIGHT_NORMAL,
+                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                        key, L"", &fmt);
+    if (FAILED(hr) || !fmt) return 0;
+    fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    if (g_fmt_n < DX_FMT_CACHE) {
+        g_fmt[g_fmt_n] = fmt;
+        g_fmt_size[g_fmt_n] = key;
+        g_fmt_n++;
+        return fmt;
+    }
+    /* cache full: evict slot 0 */
+    if (g_fmt[0]) g_fmt[0]->Release();
+    for (int i = 1; i < DX_FMT_CACHE; i++) {
+        g_fmt[i - 1] = g_fmt[i];
+        g_fmt_size[i - 1] = g_fmt_size[i];
+    }
+    g_fmt[DX_FMT_CACHE - 1] = fmt;
+    g_fmt_size[DX_FMT_CACHE - 1] = key;
+    return fmt;
+}
+
 extern "C" DXGFX_API int dxgfx_measure_text(float size, const char *utf8, dx_u32 len, float out_size[2]) {
     if (!utf8 || !out_size || !dxgfx_init()) return 0;
     if (size <= 0.0f) size = 20.0f;
@@ -293,11 +343,9 @@ extern "C" DXGFX_API int dxgfx_measure_text(float size, const char *utf8, dx_u32
     MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, ws, wlen);
     ws[wlen] = 0;
 
-    IDWriteTextFormat *fmt = 0;
+    IDWriteTextFormat *fmt = dxgfx_text_format(size);
     IDWriteTextLayout *layout = 0;
-    HRESULT hr = g_dw->CreateTextFormat(L"Consolas", 0, DWRITE_FONT_WEIGHT_NORMAL,
-                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                        size, L"", &fmt);
+    HRESULT hr = fmt ? S_OK : E_FAIL;
     if (SUCCEEDED(hr))
         hr = g_dw->CreateTextLayout(ws, (UINT32)wlen, fmt, 100000.0f, 100000.0f, &layout);
     if (SUCCEEDED(hr)) {
@@ -309,7 +357,7 @@ extern "C" DXGFX_API int dxgfx_measure_text(float size, const char *utf8, dx_u32
         }
     }
     if (layout) layout->Release();
-    if (fmt) fmt->Release();
+    /* fmt cached in dxgfx_text_format */
     free(ws);
     return SUCCEEDED(hr);
 }
@@ -326,17 +374,15 @@ extern "C" DXGFX_API int dxgfx_draw_text(int x, int y, dx_u32 argb, float size, 
     MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, ws, wlen);
     ws[wlen] = 0;
 
-    IDWriteTextFormat *fmt = 0;
-    HRESULT hr = g_dw->CreateTextFormat(L"Consolas", 0, DWRITE_FONT_WEIGHT_NORMAL,
-                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                        size * g_zoom, L"", &fmt);
+    IDWriteTextFormat *fmt = dxgfx_text_format(size * g_zoom);
+    HRESULT hr = fmt ? S_OK : E_FAIL;
     if (SUCCEEDED(hr)) {
         D2D1_SIZE_F s = g_rt->GetSize();
         float sx, sy;
         world_to_screen((float)x, (float)y, &sx, &sy);
         D2D1_RECT_F r = D2D1::RectF(sx, sy, s.width, s.height);
         g_rt->DrawText(ws, (UINT32)wlen, fmt, r, g_brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
-        fmt->Release();
+        /* fmt cached */
     }
     free(ws);
     return dxgfx_auto_end();
@@ -384,10 +430,8 @@ extern "C" DXGFX_API int dxgfx_draw_text_screen(int x, int y, dx_u32 argb, float
     if (!ws) return dxgfx_auto_end();
     MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, ws, wlen);
     ws[wlen] = 0;
-    IDWriteTextFormat *fmt = 0;
-    HRESULT hr = g_dw->CreateTextFormat(L"Consolas", 0, DWRITE_FONT_WEIGHT_NORMAL,
-                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                        size, L"", &fmt);
+    IDWriteTextFormat *fmt = dxgfx_text_format(size);
+    HRESULT hr = fmt ? S_OK : E_FAIL;
     if (SUCCEEDED(hr)) {
         D2D1_SIZE_F s = g_rt->GetSize();
         float rw, rh; dxgfx_rt_size(&rw, &rh);
@@ -395,7 +439,7 @@ extern "C" DXGFX_API int dxgfx_draw_text_screen(int x, int y, dx_u32 argb, float
         float sy = (rh > 0.0f) ? (float)y * (s.height / rh) : (float)y;
         D2D1_RECT_F r = D2D1::RectF(sx, sy, s.width, s.height);
         g_rt->DrawText(ws, (UINT32)wlen, fmt, r, g_brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
-        fmt->Release();
+        /* fmt cached */
     }
     free(ws);
     return dxgfx_auto_end();
