@@ -1,60 +1,49 @@
-# Active Project Context
+# Compacted Engineering Context
 
-## Workspace
+## Workspace and constraints
+- Project: `C:\Users\12159\Desktop\Singularity`; live server `118.25.42.70:9000`.
+- Preserve the registered 32-byte `id.bin` identity beginning `5673fae3`; never replace it with rejected identity beginning `66ee6f28`.
+- Worktree is dirty. `agent/input.json` is runner-managed/user data; do not revert unrelated changes.
+- VM blocks are `token[32] + payload_size[u32 LE] + payload`, ending with a zero token.
+- Native mod DLL names are SHA-256 content hashes. Logical block keys resolve by user override then graph child.
+- User requires first boot to be composed from small general-purpose atomic mods. Never restore integrated `ui_*`, `uistate`, `editor_frame`, or `editor_init` implementations.
 
-- Current project: `C:\Users\12159\Desktop\Singularity`
-- Server source mirror: `C:\Users\12159\Desktop\server\server.go`
-- Legacy UI reference: `C:\Users\12159\Desktop\transition\main.c`
-- Live server: `118.25.42.70:9000`
-- `id.bin` currently contains the live-server registered 32-byte identity beginning `5673fae3`; do not replace it with the rejected identity beginning `66ee6f28`.
-- Worktree is dirty. Never revert unrelated/user changes, especially `agent/input.json` changes produced by the Agent runner.
+## Atomic first boot architecture
+- Fixed bootstrap token: `46e3a50739f8438f9da55bed965c9448b8074cad3f11436981892b92800db6ed`.
+- Program logical key: `2c4ffa37caa880f5820f2ece9a03ea13ead353229813bd6930d395945bff7f6d`.
+- `generate_atomic_first_boot.py` generates `first_block.bin`, `first_program_block.bin`, action blocks, `atomic_first_boot_manifest.json`, and local data-only `instruction_names.bin`.
+- `install_generic_first_boot.py` validates that every native token is declared, hash-named, and contains no forbidden integrated-editor markers; uploads native DLLs and logical action/program blocks and sets user overrides.
+- `atomic_mod_tokens.txt` is the deterministic source-name to current DLL-token map for newly compiled atomic mods.
+- `vmstate.c` exports `cvm_replace_current`, which clears call frames and replaces the current instruction stream after self-editing. `jump_payload` uses this operation.
+- Old `ui_init`, `ui_registry`, `ui_input`, `ui_edit`, `ui_render`, all `uistate` artifacts, and seven DLLs importing `ui_state` were deleted. Final scans found no `ui_state`, `ui_reset`, `editor_state_init`, or `UI_MAX_VIEWS` in local mods.
 
-## Architecture And Constraints
+## Behavior and current direction
+- The first atomic rewrite was too minimal. It showed hashes and only supported four keyboard actions. User explicitly said the difference from the old editor was too large.
+- Input edge handling was fixed: `key_pressed` now tracks the previous high-bit state separately for all 256 virtual keys instead of using unreliable `GetAsyncKeyState(vk) & 1`.
+- The retained recent messages contain the complete implementation and verification of the richer atomic editor.
+- Rich behavior restored so far: instruction names, payload summaries, text input, prefix completion, Space/Tab insertion by registered name, Up/Down movement, Delete, Backspace, Esc clear, Ctrl+S, and the original `(640,360,1)` camera coordinate system.
+- Names are resolved through local data-only `instruction_names.bin`; no per-frame server lookup. Native responsibilities remain separate: token-name lookup, payload summary, text capture, string append/backspace/clear, registry lookup, stack token insertion, dynamic variable drawing, camera setting, etc.
+- Still missing relative to the old editor: exact mouse hit-testing and selection, right-click linked views, multiple views, view dragging, camera pan/zoom, and child-block creation. These must be restored as small geometry/view/camera/block operations and ordinary logical blocks, not another integrated UI DLL.
 
-- VM block format: repeated `token[32] + payload_size[u32 LE] + payload`, terminated by a 32-byte zero token.
-- Native mod DLL filenames are their SHA-256 hashes. Logical block keys resolve through user override first, then graph first child.
-- First boot must be composed from general-purpose mods and editable logical blocks. Do not restore the removed giant `editor_frame`/`editor_init` integrated mod.
-- Instruction registry is traversed from `sha256("#TAG")`. Tag file contents begin with `#`; instruction token children have a child file containing their display name.
-- Shared `uistate.dll` is data-only. Behavior is split across `ui_init`, `ui_registry`, `ui_input`, `ui_edit`, and `ui_render` mods.
+## Latest deployed and verified state
+- Latest first block: `0c991ebdfc13c61ae2d56c55387fe8eb6bd21a02801beec92d67e226e79e7493`.
+- Latest program block: `c95963458ee18273eec6f0b00ac40dcef6ae68d95e5116c902f8a26d48ff5492` with 306 explicit instructions.
+- Actions: down `dad6d3ff...`, up `0a25b56a...`, delete `628ab0be...`, insert `e40b7d4f...`, backspace `9445a21e...`, clear `b85466b8...`, save `4249d4a...`.
+- Real interaction tests passed: typing `drawrect` changed only the bottom input/completion area; Down changed the list; Up restored the screenshot exactly; Backspace changed one character; Esc cleared input.
+- A verified VM was left running as PID 320 at the end of implementation, but process state is ephemeral and must be rechecked before relying on it.
 
-## Current Modular First Boot
+## Build and verification practice
+- MinGW GCC is at `C:\mingw64\bin\gcc.exe`. Prefer incremental compilation of only changed mods into a temporary directory, then SHA-256 rename; do not run the full historical DLL scan unless necessary.
+- Restart the VM after any DLL token change because loaded DLLs are process-local.
+- Use PIL `ImageGrab` for screenshots. Earlier raw ctypes capture returned empty data due to undeclared 64-bit handle signatures.
+- Restore tracked cache invalidations and remove untracked runtime cache/test artifacts after deployment. Do not touch `agent/input.json` except for an explicit compaction request.
 
-- `first_block.bin` initializes UI state, scans registry, and executes logical program key `ad091072db93a94653168dd35921e72bd97de8a3e7cff503afbbb085cd847f6f`.
-- `first_program_block.bin` composes `frame_begin -> frame_clear -> ui_input -> ui_edit -> ui_render -> frame_end -> reexec`.
-- Bootstrap native token remains `46e3a50739f8438f9da55bed965c9448b8074cad3f11436981892b92800db6ed`.
-- `install_generic_first_boot.py` installs the modular blocks, sets required user overrides, votes the bootstrap child, uploads UI DLLs, and registers them under `#ui`.
-- Latest deployed program block after exact hit-testing and visible hover feedback: `1d00407efe80f95e813adde37e1aac4da65205f9d8c2c13692004c8df9f7d71f`.
-- Latest `ui_render` token: `9504b0e8f3610d7b95a24905ee811c3526e3c682f542d4ea8c0a02fbbe2cfb34`.
+## Context compaction with restored old runner
+- `agent/ae.py` is intentionally the old minimal runner invoked only as `python ae.py input.json`; do not add compaction hooks, sidecar polling, or `--compact` handling back to it.
+- `skills/context_compaction/compact.py` owns compaction independently.
+- During an active run, call `compact_active_file("input.json", summary)`. It atomically archives prior history while retaining the current assistant `tool_calls` message and any results already written for that group; old `ae.py` then reloads the file and appends the current result normally.
+- Active compaction necessarily leaves the current tool round for a later compaction. Offline compaction can replace all non-system messages.
+- Never use the removed deferred request mechanism with this runner; it will not consume request sidecars.
 
-## Implemented UI Behavior
-
-- Dark rendered window, token list, payload summaries, multiple linked views, text input/completion, selection, insert/delete, child block creation, camera pan/zoom, view dragging, and `Ctrl+S` flush.
-- `dxgfx_measure_text()` uses DirectWrite text layout metrics with the same Consolas font/size as rendering.
-- Token, title, and `<end>` hit regions use measured text width, not fixed row width.
-- Token hover now has visible exact-width background feedback. Verified: right-clicking same-row blank space caused zero screenshot change; right-clicking token text opened a view. Hover entering/leaving token changed 975 screenshot bytes.
-- A process must be fully restarted to load a newly hashed DLL.
-
-## Recent Files Added Or Changed
-
-- `uistate.c`, `uistate.h`, `uistate.dll`, `libuistate.a`
-- `mods_src/ui_init.c`, `ui_registry.c`, `ui_input.c`, `ui_edit.c`, `ui_render.c`
-- `build_uistate.bat`, `build_mods.bat`
-- `dxgfx.cpp`, `dxgfx.h`, `dxgfx.dll`
-- `first_block.bin`, `first_program_block.bin`
-- `install_generic_first_boot.py`
-- Giant integrated editor source/DLL versions and associated first-full-editor artifacts were deleted.
-
-## Context Compaction Mechanism
-
-- `agent/ae.py` sends the complete `json.messages` array on every API request.
-- For tools, the parent first persists the assistant tool call, runs a child Python process, reloads `input.json`, appends the tool result, and then loops.
-- Direct compaction from the child is incorrect because the parent appends the current tool result afterward and subsequent work logs accumulate again.
-- `agent/skills/context_compaction/compact.py` now implements a deferred sidecar request. The parent consumes it only after a tool result is durable, and also checks for a pending request before the first API call on startup.
-- Compaction now defaults to preserving zero non-system messages and inserts one `user` summary. This removes the current inspection/tool round while giving the next assistant an actionable input.
-- Offline `python ae.py input.json --compact ...` remains available only when no agent loop is using the file.
-- Synthetic lifecycle test passed: a complete tool group was reduced to exactly `system + user summary`; request cleanup, backup, atomic write, and syntax compilation passed.
-- This summary omits credentials, raw tool logs, repeated status messages, and obsolete implementation details.
-
-## Immediate Task
-
-Continue from this summary. The context-compaction skill has been corrected; verify the pending request is consumed on the next Agent startup before doing unrelated work.
+## Immediate task
+- Continue restoring the missing old-editor interactions as atomic geometry/view/camera/block operations and ordinary logical blocks. Do not reintroduce integrated UI DLLs.

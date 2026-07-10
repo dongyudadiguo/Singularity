@@ -1,1 +1,1 @@
-from .compact import compact_file
+from .compact import compact_active_file, compact_file

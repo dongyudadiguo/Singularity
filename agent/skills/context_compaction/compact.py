@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 SUMMARY_PREFIX = "[Compacted context summary; archived messages were replaced locally]"
-REQUEST_SUFFIX = ".compact-request.json"
 
 
 def _leading_system_count(messages):
@@ -42,6 +41,29 @@ def _validate_retained_tools(messages):
                 raise ValueError(
                     f"retained tool result {call_id!r} has no retained assistant tool call"
                 )
+
+
+def _active_tool_boundary(messages):
+    """Return the assistant index for the tool group currently run by old ae.py."""
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") != "assistant" or not message.get("tool_calls"):
+            continue
+
+        call_ids = {
+            call.get("id") for call in message["tool_calls"] if call.get("id")
+        }
+        trailing = messages[index + 1 :]
+        if all(
+            item.get("role") == "tool"
+            and item.get("tool_call_id") in call_ids
+            for item in trailing
+        ):
+            return index
+
+        # A later non-tool message means this group is already complete history.
+        break
+    raise ValueError("no active assistant tool-call group found")
 
 
 def compact_file(
@@ -106,59 +128,42 @@ def compact_file(
     }
 
 
-def request_path(input_path):
+def compact_active_file(input_path, summary):
+    """Compact history while old ae.py is blocked waiting for this tool."""
     path = Path(input_path).resolve()
-    return path.with_name(path.name + REQUEST_SUFFIX)
-
-
-def request_compaction(input_path, summary, keep_user_turns=0):
-    """Ask ae.py to compact after the current tool result is persisted."""
-    if not summary.strip():
-        raise ValueError("summary is empty")
-    request = request_path(input_path)
-    temp = request.with_name(request.name + ".tmp")
-    payload = {
-        "summary": summary,
-        "keep_user_turns": keep_user_turns,
-        "summary_role": "user",
-    }
-    temp.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    os.replace(temp, request)
-    return str(request)
-
-
-def apply_compaction_request(input_path):
-    request = request_path(input_path)
-    if not request.exists():
-        return None
-    payload = json.loads(request.read_text(encoding="utf-8"))
-    result = compact_file(
-        input_path,
-        payload["summary"],
-        keep_user_turns=payload.get("keep_user_turns", 0),
-        summary_role=payload.get("summary_role", "user"),
-    )
-    request.unlink()
-    return result
+    data = json.loads(path.read_text(encoding="utf-8"))
+    messages = data.get("json", {}).get("messages")
+    if not isinstance(messages, list):
+        raise ValueError("input JSON has no json.messages list")
+    boundary = _active_tool_boundary(messages)
+    return compact_file(path, summary, keep_from_index=boundary)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Compact ae.py message context")
     parser.add_argument("input_json")
     parser.add_argument("--summary-file", required=True)
+    parser.add_argument(
+        "--active",
+        action="store_true",
+        help="preserve the assistant tool group currently being executed by old ae.py",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--keep-from-index", type=int)
     group.add_argument("--keep-from-user", type=int, default=0)
     args = parser.parse_args(argv)
     summary = Path(args.summary_file).read_text(encoding="utf-8")
-    result = compact_file(
-        args.input_json,
-        summary,
-        keep_from_index=args.keep_from_index,
-        keep_user_turns=args.keep_from_user,
-    )
+    if args.active:
+        if args.keep_from_index is not None or args.keep_from_user:
+            parser.error("--active cannot be combined with a retention boundary")
+        result = compact_active_file(args.input_json, summary)
+    else:
+        result = compact_file(
+            args.input_json,
+            summary,
+            keep_from_index=args.keep_from_index,
+            keep_user_turns=args.keep_from_user,
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

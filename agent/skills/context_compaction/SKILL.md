@@ -1,57 +1,73 @@
 # Context Compaction Skill
 
-Use this skill when the user asks to compress, compact, summarize, or clear the current API context while retaining enough state to continue work.
+Use this skill when the user asks to compress, compact, summarize, or clear the
+current API context while retaining enough state to continue work.
 
 ## Understand ae.py First
 
-`ae.py` sends the complete `json.messages` array on every API request. For a tool call it follows this sequence:
+The restored, old `ae.py` sends the complete `json.messages` array on every API
+request. For a tool call it follows this sequence:
 
-1. Append the assistant message containing `tool_calls`.
-2. Launch the Python tool as a child process.
-3. Reload `input.json` after the child exits.
-4. Append the tool result.
-5. Send the entire resulting message array again.
+1. Append the assistant message containing all `tool_calls`.
+2. Run each Python child synchronously.
+3. After each child exits, reload `input.json` and append that tool result.
+4. Send the complete message array again after all results are present.
 
-Therefore a child tool must not directly compact `input.json`. The parent would append the current tool result afterward, leaving inspection commands and output in the supposedly compacted context. Compaction during an active run must be deferred until step 4 is complete.
+This runner has no command-line compaction mode and does not consume deferred
+sidecar requests. Do not use `ae.py --compact` or create a pending request.
 
 ## Active ae.py Run
 
-Create a deferred request from the Python tool:
+A child may compact the file directly because the parent is blocked until the
+child exits and reloads the file before appending its result. Active compaction
+must retain the entire current assistant `tool_calls` message and any results
+already appended for that group. This keeps all tool IDs valid, including when
+the assistant emitted multiple calls.
+
+Run from a Python tool:
 
 ```python
 from pathlib import Path
-from skills.context_compaction.compact import request_compaction
+from skills.context_compaction.compact import compact_active_file
 
 summary = Path("skills/context_compaction/current_summary.md").read_text(encoding="utf-8")
-print(request_compaction("input.json", summary))
+print(compact_active_file("input.json", summary))
 ```
 
-The parent `ae.py` checks for this sidecar request immediately after writing each tool result. It then replaces every completed non-system message with one `user` summary message. Using the `user` role matters: the summary is the new input the assistant must act on during the next API request.
-
-The default `keep_user_turns=0` is intentional. Keeping the current user turn also keeps every assistant tool call and tool result after it, which is exactly the context that usually needs removing. Include all active requirements in the summary instead.
+The current tool round remains after the summary. That is required by the API
+protocol; it can be archived by a later compaction. Never directly call
+`compact_file(..., keep_user_turns=0)` from an active child because the parent
+would append an orphaned tool result.
 
 ## Offline Command
 
-Only when no `ae.py` process is using the file:
+When no `ae.py` process is using the file, compact all non-system history with:
 
 ```bat
-python ae.py input.json --compact --summary-file skills\context_compaction\current_summary.md --keep-from-user 0
+python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md
 ```
 
-A positive `--keep-from-user N` retains the latest `N` user turns and all subsequent messages. `--keep-from-index INDEX` is for an exact, already-validated boundary.
+For an active run, the equivalent CLI is:
+
+```bat
+python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md --active
+```
+
+A positive `--keep-from-user N` retains the latest `N` user turns and all
+subsequent messages. `--keep-from-index INDEX` is for an exact, validated
+offline boundary. Neither retention option may be combined with `--active`.
 
 ## Required Behavior
 
-1. Read `ae.py` before changing the compaction mechanism.
+1. Read the current `ae.py` before choosing the compaction mechanism.
 2. Do not print or manually inspect the complete `input.json` merely to compact it.
 3. Preserve all leading `system` messages exactly.
 4. Replace archived messages with one `user` summary message.
-5. During an active run, request compaction and let the parent apply it after persisting the tool result.
-6. Default to retaining zero old user turns; the summary carries current requirements.
-7. If retaining messages, preserve complete assistant tool-call/tool-result groups and reject orphaned results.
-8. Create a timestamped backup and write atomically.
-9. Report message and byte counts before and after compaction.
-10. Never include credentials, raw tool logs, repeated status messages, or obsolete implementation detail in the summary.
+5. During an active old-runner call, retain the complete current tool-call group.
+6. Reject orphaned retained tool results and invalid boundaries.
+7. Create a timestamped backup and write atomically.
+8. Report message and byte counts before and after compaction.
+9. Never include credentials, raw tool logs, repeated status messages, or obsolete implementation detail in the summary.
 
 ## Summary Contents
 
