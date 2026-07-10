@@ -41,12 +41,16 @@ static int loaded;
 static void load_index(void) {
     if (loaded) return;
     loaded = 1;
-    FILE *f = fopen("instruction_names.bin", "rb");
-    if (!f) return;
-    fread(&entry_count, 4, 1, f);
-    if (entry_count > 2048) entry_count = 2048;
-    entry_count = (u32)fread(entries, sizeof(Entry), entry_count, f);
-    fclose(f);
+    const char *paths[] = { "instruction_names.bin", ".\instruction_names.bin", 0 };
+    for (int p = 0; paths[p]; p++) {
+        FILE *f = fopen(paths[p], "rb");
+        if (!f) continue;
+        fread(&entry_count, 4, 1, f);
+        if (entry_count > 2048) entry_count = 2048;
+        entry_count = (u32)fread(entries, sizeof(Entry), entry_count, f);
+        fclose(f);
+        return;
+    }
 }
 
 static int zero32(const u8 *p) {

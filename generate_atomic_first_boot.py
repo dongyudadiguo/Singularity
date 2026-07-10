@@ -48,12 +48,17 @@ def load_tokens():
     for line in (ROOT / "atomic_mod_tokens.txt").read_text(encoding="ascii").splitlines():
         name, value = line.split("=", 1)
         result[name] = bytes.fromhex(value)
+    return result
+
+
+def write_instruction_names(result):
+    """token -> friendly name for views_render + registry_find match."""
     records = []
-    for name, token in sorted(result.items()):
+    for name, token in sorted(result.items(), key=lambda kv: kv[0]):
         encoded = name.encode("ascii")[:95]
         records.append(token + encoded + bytes(96 - len(encoded)))
     (ROOT / "instruction_names.bin").write_bytes(struct.pack("<I", len(records)) + b"".join(records))
-    return result
+    return len(records)
 
 
 def instruction(token, payload=b""):
@@ -443,6 +448,17 @@ def main():
     for name, (key, raw) in modules.items():
         (module_dir / f"{name}.bin").write_bytes(raw)
         collect(raw)
+
+    # Friendly names for logical modules/actions (natural names; no mod./action. prefix).
+    # DLL vs block is a resolve/performance detail, not a naming namespace.
+    for name, (key, _raw) in modules.items():
+        if name not in t:
+            t[name] = key
+    for name, key in action_keys.items():
+        if name not in t:
+            t[name] = key
+    n_names = write_instruction_names(t)
+    print("instruction_names", n_names)
 
     name_by_token = {token: name for name, token in t.items()}
     manifest = {
