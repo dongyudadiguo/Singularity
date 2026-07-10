@@ -110,11 +110,29 @@ typedef struct { H token; char name[96]; } Entry;
 static Entry g_entries[2048];
 static u32 g_entry_count;
 static int g_index_loaded;
+static u32 g_name_map[4096];
+
+static u32 tok_hash(const u8 *tok) {
+    u32 h = 2166136261u;
+    for (int i = 0; i < 32; i++) { h ^= tok[i]; h *= 16777619u; }
+    return h;
+}
+
+static void rebuild_name_map(void) {
+    for (u32 i = 0; i < 4096; i++) g_name_map[i] = 0xffffffffu;
+    for (u32 i = 0; i < g_entry_count; i++) {
+        u32 h = tok_hash(g_entries[i].token) & 4095u;
+        for (u32 n = 0; n < 4096; n++) {
+            u32 s = (h + n) & 4095u;
+            if (g_name_map[s] == 0xffffffffu) { g_name_map[s] = i; break; }
+        }
+    }
+}
 
 static void load_index(void) {
     if (g_index_loaded) return;
     g_index_loaded = 1;
-    const char *paths[] = { "instruction_names.bin", ".\instruction_names.bin", 0 };
+    const char *paths[] = { "instruction_names.bin", "./instruction_names.bin", 0 };
     for (int p = 0; paths[p]; p++) {
         FILE *f = fopen(paths[p], "rb");
         if (!f) continue;
@@ -122,9 +140,11 @@ static void load_index(void) {
         if (g_entry_count > 2048) g_entry_count = 2048;
         g_entry_count = (u32)fread(g_entries, sizeof(Entry), g_entry_count, f);
         fclose(f);
+        rebuild_name_map();
         return;
     }
 }
+
 
 static int same_key(const u8 *a, const u8 *b) {
     for (int i = 0; i < 32; i++) if (a[i] != b[i]) return 0;
@@ -169,8 +189,12 @@ static const char *token_name(const u8 *tok) {
     static char hex[12];
     if (zero_key(tok)) return "<end>";
     load_index();
-    for (u32 i = 0; i < g_entry_count; i++) {
-        if (!memcmp(g_entries[i].token, tok, 32)) return g_entries[i].name;
+    u32 h = tok_hash(tok) & 4095u;
+    for (u32 n = 0; n < 4096; n++) {
+        u32 s = (h + n) & 4095u;
+        u32 idx = g_name_map[s];
+        if (idx == 0xffffffffu) break;
+        if (!memcmp(g_entries[idx].token, tok, 32)) return g_entries[idx].name;
     }
     snprintf(hex, sizeof(hex), "%02x%02x%02x%02x", tok[0], tok[1], tok[2], tok[3]);
     return hex;

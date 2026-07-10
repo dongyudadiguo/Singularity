@@ -14,7 +14,7 @@
  *   - token -> user override hash lookup (op 8)
  *   - fallback token -> first child hash lookup
  *   - hash -> file bytes loading (op 3)
- *   - a multi-entry LRU in-process block cache (8 slots)
+ *   - a multi-entry LRU in-process block cache (32 slots)
  *   - non-blocking write-back when cached bytes no longer match cache_hash
  */
 
@@ -322,26 +322,15 @@ __declspec(dllexport) void cvm_cache_load(const H k, const H h) {
 }
 
 __declspec(dllexport) int cvm_resolve_payload_hash(const H k, H h) {
-    clock_t t0 = clock();
+    /* Hot path: every bare logical token / views row resolve hits this.
+     * No printf on HIT — modular composition resolves dozens of blocks/frame. */
     if (cvm_cache_hit(k)) {
         memcpy(h, slots[primary_idx].hash, 32);
-        { static int _vc = 0; if (++_vc % 30 == 0) cvm_cache_verify_async(); }
-        clock_t t1 = clock();
-        printf("[vmstore] HIT  slot=%d key=%02x%02x%02x%02x time=%lu us\n",
-               primary_idx, k[0],k[1],k[2],k[3],
-               (unsigned long)((t1-t0)*1000000/CLOCKS_PER_SEC));
+        { static int _vc = 0; if (++_vc >= 256) { _vc = 0; cvm_cache_verify_async(); } }
         return 1;
     }
-    clock_t t_net = clock();
     if (!uget(k, h)) cvm_firstchild((u8*)k, h);
-    clock_t t_load = clock();
     cvm_cache_load(k, h);
-    clock_t t1 = clock();
-    printf("[vmstore] MISS slot=%d key=%02x%02x%02x%02x net=%lu us load=%lu us total=%lu us\n",
-           primary_idx, k[0],k[1],k[2],k[3],
-           (unsigned long)((t_load-t_net)*1000000/CLOCKS_PER_SEC),
-           (unsigned long)((t1-t_load)*1000000/CLOCKS_PER_SEC),
-           (unsigned long)((t1-t0)*1000000/CLOCKS_PER_SEC));
     return 1;
 }
 
