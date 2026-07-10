@@ -122,9 +122,7 @@ gcc -shared mods_src/screen_size.c -o mods/screen_size.dll libcont.a libvmstack.
 
 gcc -shared mods_src/input_snapshot.c -o mods/input_snapshot.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
 
-gcc -shared mods_src/editor_init.c -o mods/editor_init.dll libcont.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
 
-gcc -shared mods_src/editor_frame.c -o mods/editor_frame.dll libcont.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32 -luser32
 
 
 
