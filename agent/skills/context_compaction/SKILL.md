@@ -16,13 +16,18 @@ request. For a tool call it follows this sequence:
 This runner has no command-line compaction mode and does not consume deferred
 sidecar requests. Do not use `ae.py --compact` or create a pending request.
 
-## Active ae.py Run
+Important: after any tool round finishes, `ae.py` always continues to another
+model call. It cannot "stop after compaction" by itself. Viewer launches it with
+`AE_RUNNER=1` so the compaction child can terminate that parent process after
+replacing the transcript.
+
+## Active ae.py Run (default: compact and stop)
 
 A child may compact the file directly because the parent is blocked until the
-child exits and reloads the file before appending its result. Active compaction
-must retain the entire current assistant `tool_calls` message and any results
-already appended for that group. This keeps all tool IDs valid, including when
-the assistant emitted multiple calls.
+child exits. Default active compaction:
+
+1. Replaces all non-system messages with one summary user message.
+2. Stops the parent `ae.py` when `AE_RUNNER=1` so it does not auto-continue.
 
 Run from a Python tool:
 
@@ -34,10 +39,13 @@ summary = Path("skills/context_compaction/current_summary.md").read_text(encodin
 print(compact_active_file("input.json", summary))
 ```
 
-The current tool round remains after the summary. That is required by the API
-protocol; it can be archived by a later compaction. Never directly call
-`compact_file(..., keep_user_turns=0)` from an active child because the parent
-would append an orphaned tool result.
+Do not expect the current tool round to continue after this returns. The parent
+runner is intentionally ended. Start a new viewer run when work should resume
+from the summary.
+
+Legacy behavior that keeps the in-flight tool group and lets `ae.py` continue is
+still available as `compact_active_file_keep_tools`, but do not use it unless the
+user explicitly wants auto-continue after compaction.
 
 ## Offline Command
 
@@ -47,15 +55,22 @@ When no `ae.py` process is using the file, compact all non-system history with:
 python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md
 ```
 
-For an active run, the equivalent CLI is:
+For an active run that should stop:
 
 ```bat
 python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md --active
 ```
 
+Legacy keep-tools active compact:
+
+```bat
+python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md --active-keep-tools
+```
+
 A positive `--keep-from-user N` retains the latest `N` user turns and all
 subsequent messages. `--keep-from-index INDEX` is for an exact, validated
-offline boundary. Neither retention option may be combined with `--active`.
+offline boundary. Neither retention option may be combined with `--active` or
+`--active-keep-tools`.
 
 ## Required Behavior
 
@@ -63,7 +78,7 @@ offline boundary. Neither retention option may be combined with `--active`.
 2. Do not print or manually inspect the complete `input.json` merely to compact it.
 3. Preserve all leading `system` messages exactly.
 4. Replace archived messages with one `user` summary message.
-5. During an active old-runner call, retain the complete current tool-call group.
+5. Default active compaction stops the runner; do not leave it free to make another model call.
 6. Reject orphaned retained tool results and invalid boundaries.
 7. Create a timestamped backup and write atomically.
 8. Report message and byte counts before and after compaction.

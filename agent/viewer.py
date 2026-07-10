@@ -61,10 +61,14 @@ def start_process():
         if _process is not None and _process.poll() is None:
             return False
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+        env = os.environ.copy()
+        # Lets compaction children stop this runner without editing ae.py.
+        env["AE_RUNNER"] = "1"
         _process = subprocess.Popen(
             [agent_python(), str(AE_FILE), str(INPUT_FILE)],
             cwd=str(ROOT),
             creationflags=creationflags,
+            env=env,
         )
         return True
 

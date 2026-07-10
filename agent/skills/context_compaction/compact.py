@@ -1,6 +1,8 @@
 import argparse
 import json
 import os
+import signal
+import subprocess
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -128,8 +130,57 @@ def compact_file(
     }
 
 
+def _stop_parent_runner():
+    """Stop parent ae.py so it cannot start another API turn after compaction.
+
+    Old ae.py always continues the while-loop once tool children return. The only
+    way to honor "compact then stop" without editing ae.py is to end that parent
+    process after the replacement is on disk. Tool children inherit AE_RUNNER=1
+    when launched from viewer.py.
+    """
+    if os.environ.get("AE_RUNNER") != "1":
+        return {"attempted": False, "reason": "AE_RUNNER not set"}
+
+    ppid = os.getppid()
+    if not ppid or ppid <= 1:
+        return {"attempted": False, "reason": "no parent pid"}
+
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(ppid), "/F"],
+                capture_output=True,
+                text=True,
+                errors="ignore",
+            )
+            return {
+                "attempted": True,
+                "pid": ppid,
+                "ok": completed.returncode == 0,
+                "returncode": completed.returncode,
+                "output": ((completed.stdout or "") + (completed.stderr or "")).strip(),
+            }
+        os.kill(ppid, signal.SIGTERM)
+        return {"attempted": True, "pid": ppid, "ok": True}
+    except OSError as exc:
+        return {"attempted": True, "pid": ppid, "ok": False, "error": str(exc)}
+
+
 def compact_active_file(input_path, summary):
-    """Compact history while old ae.py is blocked waiting for this tool."""
+    """Replace non-system history with summary and stop the active ae.py runner.
+
+    Retaining the in-flight tool group would leave the old runner free to make
+    another model call after this child exits. For compaction-as-stop we write a
+    clean summary-only transcript, then terminate the parent runner when this
+    process was launched under AE_RUNNER=1.
+    """
+    result = compact_file(input_path, summary, keep_user_turns=0)
+    result["stopped_parent"] = _stop_parent_runner()
+    return result
+
+
+def compact_active_file_keep_tools(input_path, summary):
+    """Legacy active compact: keep the current tool group and do not stop ae.py."""
     path = Path(input_path).resolve()
     data = json.loads(path.read_text(encoding="utf-8"))
     messages = data.get("json", {}).get("messages")
@@ -146,17 +197,28 @@ def main(argv=None):
     parser.add_argument(
         "--active",
         action="store_true",
-        help="preserve the assistant tool group currently being executed by old ae.py",
+        help="active compact-and-stop (summary only; stops parent when AE_RUNNER=1)",
+    )
+    parser.add_argument(
+        "--active-keep-tools",
+        action="store_true",
+        help="legacy active compact that retains the current tool-call group",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--keep-from-index", type=int)
     group.add_argument("--keep-from-user", type=int, default=0)
     args = parser.parse_args(argv)
     summary = Path(args.summary_file).read_text(encoding="utf-8")
+    if args.active and args.active_keep_tools:
+        parser.error("--active cannot be combined with --active-keep-tools")
     if args.active:
         if args.keep_from_index is not None or args.keep_from_user:
             parser.error("--active cannot be combined with a retention boundary")
         result = compact_active_file(args.input_json, summary)
+    elif args.active_keep_tools:
+        if args.keep_from_index is not None or args.keep_from_user:
+            parser.error("--active-keep-tools cannot be combined with a retention boundary")
+        result = compact_active_file_keep_tools(args.input_json, summary)
     else:
         result = compact_file(
             args.input_json,
