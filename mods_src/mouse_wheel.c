@@ -1,0 +1,12 @@
+typedef unsigned u32;
+extern __declspec(dllimport) void cont(void);
+extern __declspec(dllimport) void push(const void *p, u32 size);
+#include "../dxgfx.h"
+/* push i32 wheel delta for this call (dxgfx_mouse[3]). */
+__declspec(dllexport) void run(void) {
+    int state[4] = {0, 0, 0, 0};
+    dxgfx_mouse(state);
+    int wheel = state[3];
+    push(&wheel, 4);
+    cont();
+}

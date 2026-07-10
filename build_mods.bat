@@ -170,6 +170,31 @@ gcc -shared mods_src/u32_dec_sat.c -o mods/u32_dec_sat.dll libcont.a libvmstack.
 
 gcc -shared mods_src/camera_set.c -o mods/camera_set.dll libcont.a libvmstate.a libdxgfx.a
 
+
+gcc -shared mods_src/world_mouse.c -o mods/world_mouse.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
+
+gcc -shared mods_src/mouse_wheel.c -o mods/mouse_wheel.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
+
+gcc -shared mods_src/mouse_button_down.c -o mods/mouse_button_down.dll libcont.a libvmstack.a libvmstate.a -luser32
+
+gcc -shared mods_src/mouse_button_pressed.c -o mods/mouse_button_pressed.dll libcont.a libvmstack.a libvmstate.a -luser32
+
+gcc -shared mods_src/i32_to_f32.c -o mods/i32_to_f32.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/f32_add.c -o mods/f32_add.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/f32_sub.c -o mods/f32_sub.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/f32_mul.c -o mods/f32_mul.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/f32_div.c -o mods/f32_div.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/f32_clamp.c -o mods/f32_clamp.dll libcont.a libvmstack.a libvmstate.a
+
+gcc -shared mods_src/point_in_rect.c -o mods/point_in_rect.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/hit_row.c -o mods/hit_row.dll libcont.a libvmstack.a
+
 echo.
 
 echo === Hash rename ===

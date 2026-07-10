@@ -121,6 +121,7 @@ extern "C" DXGFX_API int dxgfx_frame_end(void) {
     if (!g_rt || !g_drawing) return 0;
     HRESULT hr = g_rt->EndDraw();
     g_drawing = 0;
+    g_wheel = 0;
     dxgfx_pump();
     return SUCCEEDED(hr);
 }
@@ -206,7 +207,7 @@ extern "C" DXGFX_API int dxgfx_input_snapshot(dx_u8 keys_down[256], dx_u8 keys_p
         mouse[7] = 0;
     }
     g_prev_mouse_buttons = mb;
-    g_wheel = 0;
+    /* g_wheel is cleared in dxgfx_frame_end so all peeks in a frame see the same delta. */
     if (text) {
         int n = g_text_len;
         if (n > 63) n = 63;
