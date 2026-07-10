@@ -1,0 +1,9 @@
+{
+  "url": "https://uuapi.net/v1/chat/completions",
+  "headers": {
+    "Authorization": "Bearer sk-4625c0efcb52e9c15b7925e37bad94b7527c47ea9e52accb8bdc7dee48318015",
+    "Content-Type": "application/json"
+  },
+  "model": "grok-4.5",
+  "reasoning_effect": "high"
+}

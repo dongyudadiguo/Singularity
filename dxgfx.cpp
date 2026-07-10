@@ -244,6 +244,37 @@ static void world_to_screen(float x, float y, float *sx, float *sy) {
     *sy = (y - g_cam_y) * g_zoom + (float)sz[1] * 0.5f;
 }
 
+extern "C" DXGFX_API int dxgfx_measure_text(float size, const char *utf8, dx_u32 len, float out_size[2]) {
+    if (!utf8 || !out_size || !dxgfx_init()) return 0;
+    if (size <= 0.0f) size = 20.0f;
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, 0, 0);
+    if (wlen <= 0) { out_size[0] = out_size[1] = 0.0f; return 1; }
+    wchar_t *ws = (wchar_t*)malloc((wlen + 1) * sizeof(wchar_t));
+    if (!ws) return 0;
+    MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, ws, wlen);
+    ws[wlen] = 0;
+
+    IDWriteTextFormat *fmt = 0;
+    IDWriteTextLayout *layout = 0;
+    HRESULT hr = g_dw->CreateTextFormat(L"Consolas", 0, DWRITE_FONT_WEIGHT_NORMAL,
+                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                        size, L"", &fmt);
+    if (SUCCEEDED(hr))
+        hr = g_dw->CreateTextLayout(ws, (UINT32)wlen, fmt, 100000.0f, 100000.0f, &layout);
+    if (SUCCEEDED(hr)) {
+        DWRITE_TEXT_METRICS metrics;
+        hr = layout->GetMetrics(&metrics);
+        if (SUCCEEDED(hr)) {
+            out_size[0] = metrics.widthIncludingTrailingWhitespace;
+            out_size[1] = metrics.height;
+        }
+    }
+    if (layout) layout->Release();
+    if (fmt) fmt->Release();
+    free(ws);
+    return SUCCEEDED(hr);
+}
+
 extern "C" DXGFX_API int dxgfx_draw_text(int x, int y, dx_u32 argb, float size, const char *utf8, dx_u32 len) {
     if (!utf8) return 0;
     if (size <= 0.0f) size = 20.0f;
