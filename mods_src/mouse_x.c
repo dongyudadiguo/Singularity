@@ -1,10 +1,11 @@
 typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32 size);
 extern __declspec(dllimport) void push(const void *p, u32 size);
+#include "../dxgfx.h"
 __declspec(dllexport) void run(void) {
-    int *m = (int*)pop(16);
-    int x = m[0];
+    int state[4] = {0,0,0,0};
+    dxgfx_mouse(state);
+    int x = state[0];
     push(&x, 4);
     cont();
 }

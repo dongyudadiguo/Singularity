@@ -2,38 +2,56 @@
 
 ## Workspace and constraints
 - Project: `C:\Users\12159\Desktop\Singularity`; live server `118.25.42.70:9000`.
-- Preserve the registered 32-byte `id.bin` identity beginning `5673fae3`; never replace it with rejected identity beginning `66ee6f28`.
-- Worktree is dirty. `agent/input.json` is runner-managed/user data; do not revert unrelated changes.
-- VM blocks are `token[32] + payload_size[u32 LE] + payload`, ending with a zero token.
-- Native mod DLL names are SHA-256 content hashes. Logical block keys resolve by user override then graph child.
-- User requires first boot to be composed from small general-purpose atomic mods. Never restore integrated `ui_*`, `uistate`, `editor_frame`, or `editor_init` implementations.
+- Preserve registered 32-byte `id.bin` identity beginning `5673fae3`; never replace with rejected identity beginning `66ee6f28`.
+- Worktree is dirty. `agent/input.json` is runner-managed; do not revert unrelated changes. Do not modify `agent/ae.py` unless the user explicitly asks.
+- VM block format: `token[32] + payload_size[u32 LE] + payload`, ending with zero token.
+- Native mod DLL names are SHA-256 content hashes. Logical keys resolve by user override then graph child.
+- First boot must be small general-purpose atomic mods. Never restore integrated `ui_*`, `uistate`, `editor_frame`, or `editor_init`.
 
-## Atomic first boot architecture
+## Architecture truths
 - Fixed bootstrap token: `46e3a50739f8438f9da55bed965c9448b8074cad3f11436981892b92800db6ed`.
 - Program logical key: `2c4ffa37caa880f5820f2ece9a03ea13ead353229813bd6930d395945bff7f6d`.
-- `generate_atomic_first_boot.py` generates `first_block.bin`, `first_program_block.bin`, action blocks, `atomic_first_boot_manifest.json`, and local data-only `instruction_names.bin`.
-- `install_generic_first_boot.py` validates that every native token is declared, hash-named, and contains no forbidden integrated-editor markers; uploads native DLLs and logical action/program blocks and sets user overrides.
-- `atomic_mod_tokens.txt` is the deterministic source-name to current DLL-token map for newly compiled atomic mods.
-- `vmstate.c` exports `cvm_replace_current`, which clears call frames and replaces the current instruction stream after self-editing. `jump_payload` uses this operation.
-- Old `ui_init`, `ui_registry`, `ui_input`, `ui_edit`, `ui_render`, all `uistate` artifacts, and seven DLLs importing `ui_state` were deleted. Final scans found no `ui_state`, `ui_reset`, `editor_state_init`, or `UI_MAX_VIEWS` in local mods.
+- `generate_atomic_first_boot.py` builds `first_block.bin`, `first_program_block.bin`, action blocks, `atomic_first_boot_manifest.json`, and local `instruction_names.bin`.
+- `install_generic_first_boot.py` validates declared hash-named natives, uploads DLLs/blocks, sets overrides, votes bootstrap child.
+- `atomic_mod_tokens.txt` maps source names to current DLL tokens for newly compiled atomic mods.
+- Token dual identity: same token may be native DLL if platform supports it, else logical block via resolve/override/firstchild. Platform decides.
+- Distinguish: execute a callable token (native or instruction block) vs open/select/edit a non-instruction object token.
+- Prefer static structure by embedding block tokens in parent streams. Use `cond` for key-triggered actions. Use `exec`/`exec_payload` only when needed for function-pointer style targets or pinned content hashes; do not use `exec` as default modularization.
+- `cvm_exec`: native hit runs DLL; miss enters block. `jump_payload` replaces current stream (no return). `reexec` restarts current block without leaking frames.
+- `var_set_payload` trap: payload `id[32] + u32` with total size exactly 36 means ALLOCATE that many zero bytes, not write 4 data bytes. For 4-byte initials: allocate, then `const_payload` + `var_write_payload`.
 
-## Behavior and current direction
-- The first atomic rewrite was too minimal. It showed hashes and only supported four keyboard actions. User explicitly said the difference from the old editor was too large.
-- Input edge handling was fixed: `key_pressed` now tracks the previous high-bit state separately for all 256 virtual keys instead of using unreliable `GetAsyncKeyState(vk) & 1`.
-- The retained recent messages contain the complete implementation and verification of the richer atomic editor.
-- Rich behavior restored so far: instruction names, payload summaries, text input, prefix completion, Space/Tab insertion by registered name, Up/Down movement, Delete, Backspace, Esc clear, Ctrl+S, and the original `(640,360,1)` camera coordinate system.
-- Names are resolved through local data-only `instruction_names.bin`; no per-frame server lookup. Native responsibilities remain separate: token-name lookup, payload summary, text capture, string append/backspace/clear, registry lookup, stack token insertion, dynamic variable drawing, camera setting, etc.
-- Still missing relative to the old editor: exact mouse hit-testing and selection, right-click linked views, multiple views, view dragging, camera pan/zoom, and child-block creation. These must be restored as small geometry/view/camera/block operations and ordinary logical blocks, not another integrated UI DLL.
+## Reference UIs
+- Git commit `2385b23` 「终于重置好了」: `ui_init/registry/input/edit/render` + `uistate` multi-view editor (names, completion, insert/delete/move, Alt child, OEM_3 data, MMB pan, wheel zoom, right-click linked views, drag views, hit-test). Reference for target behavior, not to restore as integrated DLLs.
+- `C:\Users\12159\Desktop\transition\main.c` `to_dest_dev_base`: older richer SelfEdit (structure colors, brackets, selection copy/paste, mouse-follow HUD). Larger than `2385b23`; not phase-1 target.
 
-## Latest deployed and verified state
-- Latest first block: `0c991ebdfc13c61ae2d56c55387fe8eb6bd21a02801beec92d67e226e79e7493`.
-- Latest program block: `c95963458ee18273eec6f0b00ac40dcef6ae68d95e5116c902f8a26d48ff5492` with 306 explicit instructions.
-- Actions: down `dad6d3ff...`, up `0a25b56a...`, delete `628ab0be...`, insert `e40b7d4f...`, backspace `9445a21e...`, clear `b85466b8...`, save `4249d4a...`.
-- Real interaction tests passed: typing `drawrect` changed only the bottom input/completion area; Down changed the list; Up restored the screenshot exactly; Backspace changed one character; Esc cleared input.
-- A verified VM was left running as PID 320 at the end of implementation, but process state is ephemeral and must be rechecked before relying on it.
+## Current deployed first boot
+- Latest first hash: `dfbe0eebd28d8715ec8e0ad432478523d3e662858ae8535aed050c9a8b9949c7`.
+- Latest program hash: `67a2058c89c295e4057ac5236c3f61a322becf6810e3b1f6285ef7c6594f32f5` (~348 instructions).
+- Actions: `down/up/delete/insert/backspace/clear/save` plus `pan`, `click`, `set_cursor`.
+- Camera vars: `atomic.cam.x/y/z`, `atomic.cam.last_mx/my`; hit var `atomic.cursor.last_hit`; editor input/cursor vars retained.
+- Frame behavior: `camera_set_stack` from vars; MMB pan via `mouse_button_down(4)+cond->pan`; wheel zoom every frame (`zoom *= 1+0.1*wheel`, clamp 0.15..6); `world_mouse`+`hit_row` stores relative row; LMB click if `last_hit>=0` sets `cursor += last_hit`; list draw + screen-space HUD; keyboard actions unchanged.
+- Verified: VM stable ~32MB (after fixing var alloc trap that previously ballooned to multi-GB and AV'd). Dark UI renders. Down/Up list move works. Click select changes list. MMB pan changes view. Wheel zoom later verified with mouse_event/PostMessage after focus-sensitive first attempt failed.
+- `mouse_x`/`mouse_y` rewritten to self-call `dxgfx_mouse` (old versions only popped a 16-byte mouse state and would underflow if used alone).
+- `dxgfx`: wheel cleared in `frame_end` so same-frame peeks see consistent delta.
 
-## Build and verification practice
-- MinGW GCC is at `C:\mingw64\bin\gcc.exe`. Prefer incremental compilation of only changed mods into a temporary directory, then SHA-256 rename; do not run the full historical DLL scan unless necessary.
-- Restart the VM after any DLL token change because loaded DLLs are process-local.
-- Use PIL `ImageGrab` for screenshots. Earlier raw ctypes capture returned empty data due to undeclared 64-bit handle signatures.
-- Restore tracked cache invalidations and remove untracked runtime cache/test artifacts after deployment. Do not touch `agent/input.json` except for an explicit compaction request.
+## New/updated atomic mods (not exhaustive)
+- Control: `exec`, `exec_payload` (unconditional stack/payload exec; dual-identity).
+- Input/camera/geometry: `world_mouse`, `mouse_wheel`, `mouse_button_down`, `mouse_button_pressed` (per-button edge), self-contained `mouse_x`/`mouse_y`, `camera_set_stack`.
+- Float/stack: `f32_const`, `f32_add/sub/mul/div`, `f32_clamp`, `f32_neg`, `i32_to_f32`, `dup_u32`, `drop_u32`, `swap_u32`, `hit_row`, `point_in_rect`, `i32_max`.
+- Tokens recorded in `atomic_mod_tokens.txt`; `build_mods.bat` patched for rebuilds.
+
+## Agent tooling notes
+- User asked not to change `ae.py`. Terminal flash on tool calls comes from `python -c` children using `sys.executable`.
+- Fix without touching `ae.py`: `agent/viewer.py` starts agent via `pythonw.exe` (`agent_python()` + optional `CREATE_NO_WINDOW`). Restart agent from viewer for effect. `view.vbs` already launches viewer with `pythonw`.
+- Compaction: use `skills.context_compaction.compact.compact_active_file` while ae is blocked on tools.
+
+## Still missing vs 「终于重置好了」
+- Multi-view table, right-click open linked view, view dragging, parent-child lines.
+- Alt create child block + new view; OEM_3/data payload insert.
+- Stronger x-range hit testing on list rows; selection highlight still mostly ">" / fixed rect, not full per-row active styling for arbitrary cursor.
+- Do not implement as integrated UI DLL; continue atomic natives + logical blocks, prefer stream-embedded blocks over `exec`.
+
+## Exact next task
+- Continue restoring spatial multi-view editor features as small atomic ops + ordinary logical blocks.
+- Recommended order: multi-view state/draw/drag/link lines → right-click open chain → Alt child / data insert.
+- Keep keyboard editor regression green; reinstall via generate+install after program changes; restart `vm.exe` after DLL token changes.

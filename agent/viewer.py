@@ -41,12 +41,31 @@ def running():
         return _process is not None and _process.poll() is None
 
 
+def agent_python():
+    """Prefer pythonw so ae.py tool children (sys.executable -c) do not open consoles."""
+    exe = Path(sys.executable)
+    if os.name == "nt":
+        candidate = exe.with_name("pythonw.exe")
+        if candidate.exists():
+            return str(candidate)
+        # common layout: .../Python3xx/python.exe
+        sibling = exe.parent / "pythonw.exe"
+        if sibling.exists():
+            return str(sibling)
+    return str(exe)
+
+
 def start_process():
     global _process
     with _process_lock:
         if _process is not None and _process.poll() is None:
             return False
-        _process = subprocess.Popen([sys.executable, str(AE_FILE), str(INPUT_FILE)], cwd=str(ROOT))
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+        _process = subprocess.Popen(
+            [agent_python(), str(AE_FILE), str(INPUT_FILE)],
+            cwd=str(ROOT),
+            creationflags=creationflags,
+        )
         return True
 
 

@@ -80,9 +80,9 @@ gcc -shared mods_src/const_payload.c -o mods/const_payload.dll libcont.a libvmst
 
 gcc -shared mods_src/key_get.c -o mods/key_get.dll libcont.a libvmstack.a libvmstate.a
 
-gcc -shared mods_src/mouse_x.c -o mods/mouse_x.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mouse_x.c -o mods/mouse_x.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
 
-gcc -shared mods_src/mouse_y.c -o mods/mouse_y.dll libcont.a libvmstack.a libvmstate.a
+gcc -shared mods_src/mouse_y.c -o mods/mouse_y.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
 
 gcc -shared mods_src/mouse_buttons.c -o mods/mouse_buttons.dll libcont.a libvmstack.a libvmstate.a
 
@@ -196,6 +196,36 @@ gcc -shared mods_src/point_in_rect.c -o mods/point_in_rect.dll libcont.a libvmst
 gcc -shared mods_src/hit_row.c -o mods/hit_row.dll libcont.a libvmstack.a
 
 echo.
+
+
+gcc -shared mods_src/f32_const.c -o mods/f32_const.dll libcont.a libvmstack.a libvmstate.a
+
+gcc -shared mods_src/f32_neg.c -o mods/f32_neg.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/dup_u32.c -o mods/dup_u32.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/drop_u32.c -o mods/drop_u32.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/swap_u32.c -o mods/swap_u32.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/camera_set_stack.c -o mods/camera_set_stack.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
+
+gcc -shared mods_src/i32_max.c -o mods/i32_max.dll libcont.a libvmstack.a
+
+
+gcc -shared mods_src/views.c -o mods/views.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+
+gcc -shared mods_src/drawline_stack.c -o mods/drawline_stack.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
+
+gcc -shared mods_src/drawrect_stack.c -o mods/drawrect_stack.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
+
+gcc -shared mods_src/drawtext_xy_stack.c -o mods/drawtext_xy_stack.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
+
+gcc -shared mods_src/block_select_stack.c -o mods/block_select_stack.dll libcont.a libvmstack.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+
+gcc -shared mods_src/views_render.c -o mods/views_render.dll libcont.a libvmstate.a libvmvar.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+
+gcc -shared mods_src/views_open_at_row.c -o mods/views_open_at_row.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
 
 echo === Hash rename ===
 

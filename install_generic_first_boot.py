@@ -174,11 +174,17 @@ def main():
         raise RuntimeError("first_bootstrap_block.bin must contain one payload-free bootstrap mod")
     first_ins = instructions(first)
     program_key = bytes.fromhex(manifest["program_key"])
-    var_set_token = bytes.fromhex(manifest["native"]["var_set_payload"])
-    if len(first_ins) < 2 or first_ins[-1] != (program_key, b"") or any(
-            token != var_set_token for token, _ in first_ins[:-1]):
+    if len(first_ins) < 2 or first_ins[-1] != (program_key, b""):
         raise RuntimeError("first block must initialize variables and execute the atomic program key")
-    if len(instructions(program)) < 250:
+    # first block may allocate vars (var_set_payload) and write initials (const/var_write).
+    allowed_init = {
+        bytes.fromhex(manifest["native"][name])
+        for name in ("var_set_payload", "const_payload", "var_write_payload")
+        if name in manifest["native"]
+    }
+    if any(token not in allowed_init for token, _ in first_ins[:-1]):
+        raise RuntimeError("first block contains unexpected non-init instructions")
+    if len(instructions(program)) < 40:
         raise RuntimeError("atomic frame program is unexpectedly collapsed")
 
     bootstrap_token = bootstrap_ins[0][0]
