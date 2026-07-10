@@ -25,6 +25,13 @@ __declspec(dllexport) u8 *cvm_current_base(void) { return cur_base; }
 __declspec(dllexport) u8 *cvm_current_key(void) { return cur_key; }
 __declspec(dllexport) void cvm_restart_current(void) { ptr = cur_base; }
 
+__declspec(dllexport) void cvm_replace_current(const H k, u8 *base) {
+    frame_sp = 0;
+    if (k) memcpy(cur_key, k, 32);
+    cur_base = base;
+    ptr = base;
+}
+
 __declspec(dllexport) void cvm_set_current(const H k, u8 *base) {
     /*
      * Entering a resolved block replaces the current instruction stream.

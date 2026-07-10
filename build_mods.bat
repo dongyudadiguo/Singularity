@@ -126,21 +126,51 @@ gcc -shared mods_src/input_snapshot.c -o mods/input_snapshot.dll libcont.a libvm
 
 
 
-call build_uistate.bat
+gcc -shared mods_src/key_down.c -o mods/key_down.dll libcont.a libvmstack.a libvmstate.a -luser32
 
-gcc -shared mods_src/ui_init.c -o mods/ui_init.dll libcont.a libvmstate.a libvmstore.a libvm.a libuistate.a -lws2_32 -ladvapi32
+gcc -shared mods_src/key_pressed.c -o mods/key_pressed.dll libcont.a libvmstack.a libvmstate.a -luser32
 
-gcc -shared mods_src/ui_registry.c -o mods/ui_registry.dll libcont.a libvmstore.a libuistate.a -lws2_32 -ladvapi32
+gcc -shared mods_src/block_select_payload.c -o mods/block_select_payload.dll libcont.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
 
-gcc -shared mods_src/ui_input.c -o mods/ui_input.dll libcont.a libuistate.a libdxgfx.a -luser32
+gcc -shared mods_src/block_offset_at_index.c -o mods/block_offset_at_index.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
 
-gcc -shared mods_src/ui_edit.c -o mods/ui_edit.dll libcont.a libvmstore.a libvm.a libuistate.a libdxgfx.a -lws2_32 -ladvapi32 -luser32
+gcc -shared mods_src/block_token_hex.c -o mods/block_token_hex.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
 
-gcc -shared mods_src/ui_render.c -o mods/ui_render.dll libcont.a libvmstore.a libuistate.a libdxgfx.a -lws2_32 -ladvapi32 -luser32
+gcc -shared mods_src/u32_hex.c -o mods/u32_hex.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/drawtext_stack.c -o mods/drawtext_stack.dll libcont.a libvmstack.a libvmstate.a libdxgfx.a
+
+gcc -shared mods_src/jump_payload.c -o mods/jump_payload.dll libvmexec.a libvmstate.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+
+gcc -shared mods_src/block_token_name.c -o mods/block_token_name.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
+
+gcc -shared mods_src/block_payload_summary.c -o mods/block_payload_summary.dll libcont.a libvmstack.a libvmstate.a libvmstore.a
+
+gcc -shared mods_src/text_input.c -o mods/text_input.dll libcont.a libvmstack.a libdxgfx.a
+
+gcc -shared mods_src/string_append_var.c -o mods/string_append_var.dll libcont.a libvmstack.a libvmstate.a libvmvar.a
+
+gcc -shared mods_src/string_backspace_var.c -o mods/string_backspace_var.dll libcont.a libvmstate.a libvmvar.a
+
+gcc -shared mods_src/string_clear_var.c -o mods/string_clear_var.dll libcont.a libvmstate.a libvmvar.a
+
+gcc -shared mods_src/registry_find.c -o mods/registry_find.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/block_insert_stack.c -o mods/block_insert_stack.dll libcont.a libvmstack.a libvmstore.a
+
+gcc -shared mods_src/drawtext_var.c -o mods/drawtext_var.dll libcont.a libvmstate.a libvmvar.a libdxgfx.a
+
+gcc -shared mods_src/registry_token_name.c -o mods/registry_token_name.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/u32_dec_sat.c -o mods/u32_dec_sat.dll libcont.a libvmstack.a
+
+gcc -shared mods_src/camera_set.c -o mods/camera_set.dll libcont.a libvmstate.a libdxgfx.a
 
 echo.
 
 echo === Hash rename ===
+
+if exist mod_tokens.txt del mod_tokens.txt
 
 for %%f in (mods\*.dll) do call :hash_rename "%%f"
 
@@ -157,6 +187,7 @@ for /f "skip=1 delims=" %%h in ('certutil -hashfile "%~1" SHA256') do set "hash=
 :got_hash
 
 set "hash=!hash: =!"
+echo %~n1=!hash!>>mod_tokens.txt
 
 if /i not "%~nx1"=="!hash!.dll" (
 

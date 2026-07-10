@@ -1,4 +1,5 @@
 import hashlib
+import json
 import socket
 import struct
 from pathlib import Path
@@ -117,66 +118,80 @@ def invalidate_children_cache(token):
     cache.unlink(missing_ok=True)
 
 
-def require_native_mods(blocks):
-    """Every directly used native token must be a normal hash-named DLL.
+def load_manifest():
+    path = ROOT / "atomic_first_boot_manifest.json"
+    manifest = json.loads(path.read_text(encoding="ascii"))
+    required = {"program_key", "native", "actions", "first_hash", "program_hash"}
+    if not required <= manifest.keys():
+        raise RuntimeError("atomic first-boot manifest is incomplete")
+    return manifest
 
-    Logical block keys are allowed to have no DLL.  The removed integrated
-    editor exported editor_state_init; no first-boot block may reference it.
-    """
+
+def require_atomic_mods(manifest, blocks):
+    forbidden = (b"ui_state", b"ui_reset", b"editor_state_init", b"UI_MAX_VIEWS")
+    allowed = {bytes.fromhex(value): name for name, value in manifest["native"].items()}
+    logical = {bytes.fromhex(manifest["program_key"])}
+    logical.update(bytes.fromhex(value["key"]) for value in manifest["actions"].values())
+    bootstrap_tokens = {token for token, _ in instructions(blocks["first_bootstrap_block.bin"])}
     for block_name, raw in blocks.items():
         for token, _ in instructions(raw):
+            if token in logical:
+                continue
+            name = allowed.get(token)
+            if name is None and token in bootstrap_tokens and block_name == "first_bootstrap_block.bin":
+                name = "bootstrap"
+            if name is None:
+                raise RuntimeError(f"{block_name} uses undeclared native token {token.hex()}")
             dll = ROOT / "mods" / f"{token.hex()}.dll"
             if not dll.exists():
-                continue  # logical block key, resolved through the graph
+                raise RuntimeError(f"missing hash-named DLL for {name}")
             data = dll.read_bytes()
-            if b"editor_state_init" in data:
-                raise RuntimeError(
-                    f"{block_name} references removed integrated editor mod {token.hex()}"
-                )
+            if hashlib.sha256(data).digest() != token:
+                raise RuntimeError(f"DLL filename hash mismatch for {name}")
+            if any(marker in data for marker in forbidden):
+                raise RuntimeError(f"integrated editor mod forbidden: {name}")
 
 
 def main():
     identity = load_verified_identity()
+    manifest = load_manifest()
     first = (ROOT / "first_block.bin").read_bytes()
     program = (ROOT / "first_program_block.bin").read_bytes()
     bootstrap = (ROOT / "first_bootstrap_block.bin").read_bytes()
+    actions = {name: (ROOT / "atomic_action_blocks" / f"{name}.bin").read_bytes()
+               for name in manifest["actions"]}
+    blocks = {"first_block.bin": first, "first_program_block.bin": program,
+              "first_bootstrap_block.bin": bootstrap}
+    blocks.update({f"atomic_action_blocks/{name}.bin": raw for name, raw in actions.items()})
+    require_atomic_mods(manifest, blocks)
 
-    blocks = {
-        "first_block.bin": first,
-        "first_program_block.bin": program,
-        "first_bootstrap_block.bin": bootstrap,
-    }
-    require_native_mods(blocks)
-    first_ins = instructions(first)
-    program_ins = instructions(program)
+    if hashlib.sha256(first).hexdigest() != manifest["first_hash"]:
+        raise RuntimeError("first block differs from manifest")
+    if hashlib.sha256(program).hexdigest() != manifest["program_hash"]:
+        raise RuntimeError("program block differs from manifest")
     bootstrap_ins = instructions(bootstrap)
     if len(bootstrap_ins) != 1 or bootstrap_ins[0][1]:
         raise RuntimeError("first_bootstrap_block.bin must contain one payload-free bootstrap mod")
-    if len(first_ins) != 3 or len(first_ins[0][1]) != 32:
-        raise RuntimeError("first block must initialize and execute one logical program key")
-    program_key = first_ins[0][1]
-    if first_ins[-1] != (program_key, b""):
-        raise RuntimeError("first block does not execute its initialized program key")
-    if len(program_ins) < 6:
-        raise RuntimeError("modular first-run program is incomplete")
+    first_ins = instructions(first)
+    program_key = bytes.fromhex(manifest["program_key"])
+    var_set_token = bytes.fromhex(manifest["native"]["var_set_payload"])
+    if len(first_ins) < 2 or first_ins[-1] != (program_key, b"") or any(
+            token != var_set_token for token, _ in first_ins[:-1]):
+        raise RuntimeError("first block must initialize variables and execute the atomic program key")
+    if len(instructions(program)) < 250:
+        raise RuntimeError("atomic frame program is unexpectedly collapsed")
 
     bootstrap_token = bootstrap_ins[0][0]
-    module_tokens = {
-        "ui_init": first_ins[0][0],
-        "ui_registry": first_ins[1][0],
-        "frame_begin": program_ins[0][0],
-        "frame_clear": program_ins[1][0],
-        "ui_input": program_ins[2][0],
-        "ui_edit": program_ins[3][0],
-        "ui_render": program_ins[4][0],
-        "frame_end": program_ins[5][0],
-        "reexec": program_ins[6][0],
-    }
-    for name, token in module_tokens.items():
-        if not (ROOT / "mods" / f"{token.hex()}.dll").exists():
-            raise RuntimeError(f"missing hash-named DLL for {name}")
-
     with socket.create_connection(SERVER, timeout=10) as sock:
+        for name, raw in actions.items():
+            action_hash = upload(sock, raw)
+            expected = manifest["actions"][name]
+            if action_hash.hex() != expected["hash"]:
+                raise RuntimeError(f"action hash mismatch for {name}")
+            action_key = bytes.fromhex(expected["key"])
+            add_edge(sock, action_key, action_hash)
+            set_override(sock, identity, action_key, action_hash)
+
         program_hash = upload(sock, program)
         first_hash = upload(sock, first)
         add_edge(sock, program_key, program_hash)
@@ -190,26 +205,28 @@ def main():
         vote(sock, identity, bootstrap_token, first_hash)
 
         tag = hashlib.sha256(b"#TAG").digest()
-        ui_tag = upload(sock, b"#ui")
-        add_edge(sock, tag, ui_tag)
-        for name, token in module_tokens.items():
-            dll = (ROOT / "mods" / f"{token.hex()}.dll").read_bytes()
+        atomic_tag = upload(sock, b"#atomic")
+        add_edge(sock, tag, atomic_tag)
+        for name, value in manifest["native"].items():
+            token = bytes.fromhex(value)
+            dll = (ROOT / "mods" / f"{value}.dll").read_bytes()
             if upload(sock, dll) != token:
                 raise RuntimeError(f"uploaded token mismatch for {name}")
             name_hash = upload(sock, name.encode("ascii"))
-            add_edge(sock, ui_tag, token)
+            add_edge(sock, atomic_tag, token)
             add_edge(sock, token, name_hash)
 
     invalidate_children_cache(tag)
-    invalidate_children_cache(ui_tag)
-    for token in module_tokens.values():
-        invalidate_children_cache(token)
-
-    print("installed modular first boot")
+    invalidate_children_cache(atomic_tag)
+    for value in manifest["native"].values():
+        invalidate_children_cache(bytes.fromhex(value))
+    print("installed atomic first boot")
     print("bootstrap token:", bootstrap_token.hex())
     print("first block:    ", first_hash.hex())
     print("program key:    ", program_key.hex())
     print("program block:  ", program_hash.hex())
+    for name, value in manifest["actions"].items():
+        print(f"action {name:6}:", value["hash"])
 
 
 if __name__ == "__main__":
