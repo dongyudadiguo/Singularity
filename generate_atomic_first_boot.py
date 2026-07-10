@@ -19,12 +19,42 @@ PAN_ACTIVE = hashlib.sha256(b"atomic.cam.pan_active").digest()
 DRAG_ANCHORED = hashlib.sha256(b"atomic.cam.drag_anchored").digest()
 VIEWS = hashlib.sha256(b"atomic.views.table").digest()
 
-# Logical (non-DLL) module tokens. Frame program composes them via const+exec.
-MOD_CAMERA = hashlib.sha256(b"#atomic.mod.camera").digest()
-MOD_INPUT = hashlib.sha256(b"#atomic.mod.input").digest()
-MOD_ZOOM = hashlib.sha256(b"#atomic.mod.zoom").digest()
-MOD_HUD = hashlib.sha256(b"#atomic.mod.hud").digest()
-MOD_EDITOR = hashlib.sha256(b"#atomic.mod.editor").digest()
+
+def mod_key(name: str) -> bytes:
+    """Top-level module logical key (stable salt; name display is plain)."""
+    return hashlib.sha256(f"#atomic.mod.{name}".encode("ascii")).digest()
+
+
+def part_key(name: str) -> bytes:
+    """Named firstchild part of a specialized composite."""
+    return hashlib.sha256(f"#atomic.part.{name}".encode("ascii")).digest()
+
+
+# Top-level frame modules (logical, non-DLL). Keep legacy mod salts.
+MOD_CAMERA = mod_key("camera")
+MOD_INPUT = mod_key("input")
+MOD_ZOOM = mod_key("zoom")
+MOD_HUD = mod_key("hud")
+MOD_EDITOR = mod_key("editor")
+
+# Specialized composites -> named firstchild parts (more integrated => more parts).
+PART_STATUS = part_key("status")
+PART_TYPEIN = part_key("typein")
+PART_MATCH = part_key("match")
+PART_NAV = part_key("nav")
+PART_EDITKEYS = part_key("editkeys")
+PART_SAVEKEY = part_key("savekey")
+PART_CLICK_ON = part_key("click_on")
+PART_RMB_ON = part_key("rmb_on")
+PART_PAN_ON = part_key("pan_on")
+PART_DRAG_ON = part_key("drag_on")
+PART_PAN_X = part_key("pan_x")
+PART_PAN_Y = part_key("pan_y")
+PART_ZOOM_Z = part_key("zoom_z")
+PART_ZOOM_X = part_key("zoom_x")
+PART_ZOOM_Y = part_key("zoom_y")
+PART_DRAG_XY = part_key("drag_xy")
+PART_RMB_OPEN = part_key("rmb_open")
 
 ACTION_CORE = ("down", "up", "delete", "insert", "backspace", "clear", "save")
 ACTION_POINTER = (
@@ -97,15 +127,13 @@ def cond_action(t, key):
     return (t["cond_payload"], key)
 
 
-def call_mod(t, key):
-    """Run a logical module token block (non-DLL) by placing the token itself
-    in the instruction stream (empty payload). VM: no DLL -> resolve override
-    -> enter block; on end, cont() advances past this token. No exec needed."""
-    return [(key, b"")]
+def bare(key):
+    """Place a logical token in the stream (empty payload). Resolves to firstchild block."""
+    return (key, b"")
 
 
 # ---------------------------------------------------------------------------
-# Module bodies (each becomes its own logical token block)
+# Leaf action bodies (short reusable units; still logical firstchild blocks)
 # ---------------------------------------------------------------------------
 
 def build_begin_pan(t):
@@ -125,26 +153,6 @@ def build_end_pan(t):
     ]
 
 
-def build_pan(t, action_keys):
-    return [
-        (t["var_read_payload"], PAN_ACTIVE),
-        (t["not"], b""),
-        cond_action(t, action_keys["begin_pan"]),
-        (t["var_read_payload"], GRAB_CX),
-        (t["mouse_f"], b""), (t["drop_u32"], b""),
-        (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
-        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
-        (t["f32_sub"], b""),
-        (t["var_write_payload"], CAM_X),
-        (t["var_read_payload"], GRAB_CY),
-        (t["mouse_f"], b""), (t["swap_u32"], b""), (t["drop_u32"], b""),
-        (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
-        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
-        (t["f32_sub"], b""),
-        (t["var_write_payload"], CAM_Y),
-    ]
-
-
 def build_begin_drag_anchor(t):
     return [
         (t["mouse_f"], b""),
@@ -154,42 +162,6 @@ def build_begin_drag_anchor(t):
         (t["var_write_payload"], GRAB_VY),
         (t["var_write_payload"], GRAB_VX),
         (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
-    ]
-
-
-def build_rmb(t):
-    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
-    return [
-        (t["world_mouse"], b""),
-        views_op(t, 30, hit_args),
-        (t["drop_u32"], b""),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
-        (t["mouse_f"], b""),
-        (t["var_write_payload"], GRAB_MY),
-        (t["var_write_payload"], GRAB_MX),
-        views_op(t, 32),
-        (t["var_write_payload"], GRAB_VY),
-        (t["var_write_payload"], GRAB_VX),
-        (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
-    ]
-
-
-def build_drag(t, action_keys):
-    return [
-        (t["var_read_payload"], DRAG_ANCHORED),
-        (t["not"], b""),
-        cond_action(t, action_keys["begin_drag_anchor"]),
-        (t["var_read_payload"], GRAB_VX),
-        (t["mouse_f"], b""), (t["drop_u32"], b""),
-        (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
-        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
-        (t["f32_add"], b""),
-        (t["var_read_payload"], GRAB_VY),
-        (t["mouse_f"], b""), (t["swap_u32"], b""), (t["drop_u32"], b""),
-        (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
-        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
-        (t["f32_add"], b""),
-        views_op(t, 33),
     ]
 
 
@@ -229,26 +201,50 @@ def build_editor_actions(t):
     }
 
 
-def mod_camera_apply(t):
+# ---------------------------------------------------------------------------
+# Decomposed parts: specialized math / draw / bind units
+# ---------------------------------------------------------------------------
+
+def part_pan_x(t):
     return [
-        (t["var_read_payload"], CAM_X),
-        (t["var_read_payload"], CAM_Y),
-        (t["var_read_payload"], CAM_Z),
-        (t["camera_set_stack"], b""),
+        (t["var_read_payload"], GRAB_CX),
+        (t["mouse_f"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
+        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
+        (t["f32_sub"], b""),
+        (t["var_write_payload"], CAM_X),
     ]
 
 
-def mod_zoom(t, zoom_apply_key):
-    """Only when wheel != 0: mouse-centered zoom (avoids cam drift on mouse move)."""
+def part_pan_y(t):
     return [
-        (t["mouse_wheel"], b""),
-        # nonzero i32 is truthy for cond_payload
-        (t["cond_payload"], zoom_apply_key),
+        (t["var_read_payload"], GRAB_CY),
+        (t["mouse_f"], b""), (t["swap_u32"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
+        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
+        (t["f32_sub"], b""),
+        (t["var_write_payload"], CAM_Y),
     ]
 
 
-def build_zoom_apply(t):
-    """factor=1+wheel*0.08; cam' = world + (cam-world)*(old/new)."""
+def part_drag_xy(t):
+    return [
+        (t["var_read_payload"], GRAB_VX),
+        (t["mouse_f"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
+        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
+        (t["f32_add"], b""),
+        (t["var_read_payload"], GRAB_VY),
+        (t["mouse_f"], b""), (t["swap_u32"], b""), (t["drop_u32"], b""),
+        (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
+        (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
+        (t["f32_add"], b""),
+        views_op(t, 33),
+    ]
+
+
+def part_zoom_z(t):
+    """new_z = clamp(old_z * (1 + wheel*0.08)); leave ratio=old/new on stack."""
     return [
         (t["var_read_payload"], CAM_Z),
         (t["dup_u32"], b""),
@@ -262,7 +258,13 @@ def build_zoom_apply(t):
         (t["f32_clamp"], f32(0.15) + f32(6.0)),
         (t["dup_u32"], b""),
         (t["var_write_payload"], CAM_Z),
-        (t["f32_div"], b""),
+        (t["f32_div"], b""),  # stack: ratio
+    ]
+
+
+def part_zoom_x(t):
+    """cam_x' = world_x + (cam_x - world_x) * ratio; consumes one ratio, leaves ratio."""
+    return [
         (t["dup_u32"], b""),
         (t["var_read_payload"], CAM_X),
         (t["world_mouse"], b""),
@@ -273,6 +275,12 @@ def build_zoom_apply(t):
         (t["drop_u32"], b""),
         (t["f32_add"], b""),
         (t["var_write_payload"], CAM_X),
+    ]
+
+
+def part_zoom_y(t):
+    """cam_y' = world_y + (cam_y - world_y) * ratio; consumes ratio."""
+    return [
         (t["var_read_payload"], CAM_Y),
         (t["world_mouse"], b""),
         (t["swap_u32"], b""),
@@ -287,29 +295,35 @@ def build_zoom_apply(t):
     ]
 
 
-def mod_input_pointer(t, action_keys):
+def part_rmb_open(t):
+    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
     return [
-        (t["mouse_button_pressed"], u32(1)), cond_action(t, action_keys["click"]),
-        (t["mouse_button_pressed"], u32(2)), cond_action(t, action_keys["rmb"]),
-        (t["mouse_button_down"], u32(4)), cond_action(t, action_keys["pan"]),
-        (t["mouse_button_down"], u32(4)), (t["not"], b""), cond_action(t, action_keys["end_pan"]),
-        (t["mouse_button_down"], u32(2)), cond_action(t, action_keys["drag"]),
-        (t["mouse_button_down"], u32(2)), (t["not"], b""), cond_action(t, action_keys["end_drag"]),
+        (t["world_mouse"], b""),
+        views_op(t, 30, hit_args),
+        (t["drop_u32"], b""),
     ]
 
 
-def mod_hud(t):
+def part_status(t):
     return [
         (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
             b"multi-view | modular token blocks | mouse-zoom | Ctrl+S")),
-        (t["text_input"], b""), (t["string_append_var"], INPUT_VAR),
+    ]
 
+
+def part_typein(t):
+    return [
+        (t["text_input"], b""), (t["string_append_var"], INPUT_VAR),
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
         (t["swap_u32"], b""), (t["drop_u32"], b""),
         (t["f32_const"], f32(20.0)), (t["swap_u32"], b""),
         (t["drawtext_var_xy_screen"], INPUT_VAR + struct.pack("<If", 0xffffffff, 17.0)),
+    ]
 
+
+def part_match(t):
+    return [
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
         (t["swap_u32"], b""), (t["drop_u32"], b""),
@@ -322,18 +336,222 @@ def mod_hud(t):
     ]
 
 
-def mod_editor_keys(t, action_keys):
+def part_nav(t, action_keys):
     return [
         (t["key_pressed"], u32(0x28)), cond_action(t, action_keys["down"]),
         (t["key_pressed"], u32(0x26)), cond_action(t, action_keys["up"]),
+    ]
+
+
+def part_editkeys(t, action_keys):
+    return [
         (t["key_pressed"], u32(0x2e)), cond_action(t, action_keys["delete"]),
         (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["insert"]),
         (t["key_pressed"], u32(0x09)), cond_action(t, action_keys["insert"]),
         (t["key_pressed"], u32(0x08)), cond_action(t, action_keys["backspace"]),
         (t["key_pressed"], u32(0x1b)), cond_action(t, action_keys["clear"]),
+    ]
+
+
+def part_savekey(t, action_keys):
+    return [
         (t["key_down"], u32(0x11)), (t["key_pressed"], u32(ord("S"))), (t["and"], b""),
         cond_action(t, action_keys["save"]),
     ]
+
+
+def part_click_on(t, action_keys):
+    return [
+        (t["mouse_button_pressed"], u32(1)), cond_action(t, action_keys["click"]),
+    ]
+
+
+def part_rmb_on(t, action_keys):
+    return [
+        (t["mouse_button_pressed"], u32(2)), cond_action(t, action_keys["rmb"]),
+    ]
+
+
+def part_pan_on(t, action_keys):
+    return [
+        (t["mouse_button_down"], u32(4)), cond_action(t, action_keys["pan"]),
+        (t["mouse_button_down"], u32(4)), (t["not"], b""), cond_action(t, action_keys["end_pan"]),
+    ]
+
+
+def part_drag_on(t, action_keys):
+    return [
+        (t["mouse_button_down"], u32(2)), cond_action(t, action_keys["drag"]),
+        (t["mouse_button_down"], u32(2)), (t["not"], b""), cond_action(t, action_keys["end_drag"]),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Composite logical tokens: bodies are bare firstchild tokens (not native soup)
+# ---------------------------------------------------------------------------
+
+def mod_camera_apply(t):
+    # Small general-purpose apply: keep as native sequence (not specialized).
+    return [
+        (t["var_read_payload"], CAM_X),
+        (t["var_read_payload"], CAM_Y),
+        (t["var_read_payload"], CAM_Z),
+        (t["camera_set_stack"], b""),
+    ]
+
+
+def mod_zoom(t, zoom_apply_key):
+    return [
+        (t["mouse_wheel"], b""),
+        (t["cond_payload"], zoom_apply_key),
+    ]
+
+
+def mod_input(t):
+    return [
+        bare(PART_CLICK_ON),
+        bare(PART_RMB_ON),
+        bare(PART_PAN_ON),
+        bare(PART_DRAG_ON),
+    ]
+
+
+def mod_hud(t):
+    return [
+        bare(PART_STATUS),
+        bare(PART_TYPEIN),
+        bare(PART_MATCH),
+    ]
+
+
+def mod_editor(t):
+    return [
+        bare(PART_NAV),
+        bare(PART_EDITKEYS),
+        bare(PART_SAVEKEY),
+    ]
+
+
+def build_pan(t, action_keys):
+    # Specialized pan: ensure anchor, then axis parts as firstchild tokens.
+    return [
+        (t["var_read_payload"], PAN_ACTIVE),
+        (t["not"], b""),
+        cond_action(t, action_keys["begin_pan"]),
+        bare(PART_PAN_X),
+        bare(PART_PAN_Y),
+    ]
+
+
+def build_drag(t, action_keys):
+    return [
+        (t["var_read_payload"], DRAG_ANCHORED),
+        (t["not"], b""),
+        cond_action(t, action_keys["begin_drag_anchor"]),
+        bare(PART_DRAG_XY),
+    ]
+
+
+def build_rmb(t, action_keys):
+    return [
+        bare(PART_RMB_OPEN),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
+        bare(action_keys["begin_drag_anchor"]),
+    ]
+
+
+def build_zoom_apply(t):
+    return [
+        bare(PART_ZOOM_Z),
+        bare(PART_ZOOM_X),
+        bare(PART_ZOOM_Y),
+    ]
+
+
+
+# ---------------------------------------------------------------------------
+# Specialized native surfaces: DLL still executes via find(); editor open
+# resolves override -> instruction block of named firstchild facets.
+# More integrated/specialized => more named facet tokens.
+# ---------------------------------------------------------------------------
+
+def sample_views(t, op, args=b""):
+    """One-instruction leaf showing a views op call pattern."""
+    return make_block([views_op(t, op, args)])
+
+
+def build_native_surfaces(t):
+    """Map surface_name -> (native_token, surface_block_bytes, facet_modules).
+
+    facet_modules: name -> (key, raw) extra logical blocks referenced by surface.
+    """
+    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
+    ensure_args = PROGRAM_KEY + f32(40.0) + f32(70.0)
+
+    # Facet keys (logical). Display names are plain: ensure, pointer_rmb, ...
+    facets = {
+        "ensure": (part_key("views.ensure"), sample_views(t, 18, ensure_args)),
+        "active_key": (part_key("views.active_key"), sample_views(t, 22)),
+        "active_cursor": (part_key("views.active_cursor"), sample_views(t, 21)),
+        "cursor_add": (part_key("views.cursor_add"), sample_views(t, 23, i32(1))),
+        "cursor_dec": (part_key("views.cursor_dec"), sample_views(t, 24)),
+        "pointer_lmb": (part_key("views.pointer_lmb"), sample_views(t, 29, hit_args)),
+        "pointer_rmb": (part_key("views.pointer_rmb"), sample_views(t, 30, hit_args)),
+        "drag_end": (part_key("views.drag_end"), sample_views(t, 13)),
+        "get_drag_xy": (part_key("views.get_drag_xy"), sample_views(t, 32)),
+        "set_drag_xy": (part_key("views.set_drag_xy"), sample_views(t, 33)),
+        "open": (part_key("views.open"), sample_views(
+            t, 14, PROGRAM_KEY + f32(120.0) + f32(90.0) + i32(-1) + f32(80.0) + f32(10.0))),
+        "init": (part_key("views.init"), sample_views(t, 0, PROGRAM_KEY + f32(40.0) + f32(70.0))),
+        "count": (part_key("views.count"), sample_views(t, 1)),
+        "active": (part_key("views.active"), sample_views(t, 2)),
+        "set_active": (part_key("views.set_active"), sample_views(t, 3, u32(0))),
+        "get_xy": (part_key("views.get_xy"), sample_views(t, 4, u32(0))),
+        "set_xy": (part_key("views.set_xy"), sample_views(t, 5, u32(0) + f32(0.0) + f32(0.0))),
+        "get_key": (part_key("views.get_key"), sample_views(t, 6, u32(0))),
+        "get_cursor": (part_key("views.get_cursor"), sample_views(t, 9, u32(0))),
+        "set_cursor": (part_key("views.set_cursor"), sample_views(t, 10, u32(0) + u32(0))),
+        "drag_begin": (part_key("views.drag_begin"), sample_views(t, 11, u32(0))),
+        "drag_step": (part_key("views.drag_step"), sample_views(t, 12, f32(0.0) + f32(0.0))),
+        "hit_title": (part_key("views.hit_title"), sample_views(t, 15, f32(32.0))),
+        "hit_row": (part_key("views.hit_row"), sample_views(t, 16, f32(24.0) + u32(256))),
+        "move_by": (part_key("views.move_by"), sample_views(t, 17, u32(0) + f32(0.0) + f32(0.0))),
+        "get_dragging": (part_key("views.get_dragging"), sample_views(t, 19)),
+        "set_cursor_active": (part_key("views.set_cursor_active"), sample_views(t, 20, u32(0))),
+    }
+
+    # Surface body: only bare facet tokens (decomposable firstchild list).
+    # Order = primary specialized API surface first, then secondary ops.
+    surface_order = [
+        "ensure", "pointer_lmb", "pointer_rmb", "get_drag_xy", "set_drag_xy",
+        "drag_end", "active_key", "active_cursor", "cursor_add", "cursor_dec",
+        "open", "init", "count", "active", "set_active",
+        "get_xy", "set_xy", "get_key", "get_cursor", "set_cursor",
+        "drag_begin", "drag_step", "hit_title", "hit_row", "move_by",
+        "get_dragging", "set_cursor_active",
+    ]
+    views_surface = make_block([bare(facets[n][0]) for n in surface_order])
+
+    # views_render: specialized renderer — expose as its own surface with leaf.
+    render_leaf_key = part_key("views.render_draw")
+    render_leaf = make_block([(t["views_render"], VIEWS)])
+    render_surface = make_block([bare(render_leaf_key)])
+
+    surfaces = {
+        "views": {
+            "native": "views",
+            "token": t["views"],
+            "block": views_surface,
+            "facets": {n: facets[n] for n in surface_order},
+        },
+        "views_render": {
+            "native": "views_render",
+            "token": t["views_render"],
+            "block": render_surface,
+            "facets": {"render_draw": (render_leaf_key, render_leaf)},
+        },
+    }
+    return surfaces
 
 
 def main():
@@ -366,32 +584,52 @@ def main():
     actions["begin_drag_anchor"] = make_block(build_begin_drag_anchor(t))
     actions["pan"] = make_block(build_pan(t, action_keys))
     actions["click"] = make_block(build_click(t))
-    actions["rmb"] = make_block(build_rmb(t))
+    actions["rmb"] = make_block(build_rmb(t, action_keys))
     actions["drag"] = make_block(build_drag(t, action_keys))
     actions["end_drag"] = make_block(build_end_drag(t))
     actions["zoom_apply"] = make_block(build_zoom_apply(t))
 
-    # Each module is a separate logical token block (content-addressed via override).
+    # Parts first (leaf content), then composite modules that bare-call them.
+    # Rule: the more specialized/integrated, the more firstchild token blocks.
     modules = {
+        # --- leaf parts (editable units) ---
+        "status": (PART_STATUS, make_block(part_status(t))),
+        "typein": (PART_TYPEIN, make_block(part_typein(t))),
+        "match": (PART_MATCH, make_block(part_match(t))),
+        "nav": (PART_NAV, make_block(part_nav(t, action_keys))),
+        "editkeys": (PART_EDITKEYS, make_block(part_editkeys(t, action_keys))),
+        "savekey": (PART_SAVEKEY, make_block(part_savekey(t, action_keys))),
+        "click_on": (PART_CLICK_ON, make_block(part_click_on(t, action_keys))),
+        "rmb_on": (PART_RMB_ON, make_block(part_rmb_on(t, action_keys))),
+        "pan_on": (PART_PAN_ON, make_block(part_pan_on(t, action_keys))),
+        "drag_on": (PART_DRAG_ON, make_block(part_drag_on(t, action_keys))),
+        "pan_x": (PART_PAN_X, make_block(part_pan_x(t))),
+        "pan_y": (PART_PAN_Y, make_block(part_pan_y(t))),
+        "zoom_z": (PART_ZOOM_Z, make_block(part_zoom_z(t))),
+        "zoom_x": (PART_ZOOM_X, make_block(part_zoom_x(t))),
+        "zoom_y": (PART_ZOOM_Y, make_block(part_zoom_y(t))),
+        "drag_xy": (PART_DRAG_XY, make_block(part_drag_xy(t))),
+        "rmb_open": (PART_RMB_OPEN, make_block(part_rmb_open(t))),
+        # --- composite modules (bare firstchild parts only) ---
         "camera": (MOD_CAMERA, make_block(mod_camera_apply(t))),
-        "input": (MOD_INPUT, make_block(mod_input_pointer(t, action_keys))),
+        "input": (MOD_INPUT, make_block(mod_input(t))),
         "zoom": (MOD_ZOOM, make_block(mod_zoom(t, action_keys["zoom_apply"]))),
         "hud": (MOD_HUD, make_block(mod_hud(t))),
-        "editor": (MOD_EDITOR, make_block(mod_editor_keys(t, action_keys))),
+        "editor": (MOD_EDITOR, make_block(mod_editor(t))),
     }
 
     # Thin orchestrator: glue + bare logical module tokens (no exec).
     program = [
         (t["frame_begin"], b""),
         views_op(t, 18, PROGRAM_KEY + f32(40.0) + f32(70.0)),
-        *call_mod(t, MOD_CAMERA),
+        bare(MOD_CAMERA),
         (t["frame_clear"], u32(0xff11161b)),
-        *call_mod(t, MOD_INPUT),
-        *call_mod(t, MOD_ZOOM),
-        *call_mod(t, MOD_CAMERA),
+        bare(MOD_INPUT),
+        bare(MOD_ZOOM),
+        bare(MOD_CAMERA),
         (t["views_render"], VIEWS),
-        *call_mod(t, MOD_HUD),
-        *call_mod(t, MOD_EDITOR),
+        bare(MOD_HUD),
+        bare(MOD_EDITOR),
         (t["frame_end"], b""),
         (t["reexec"], b""),
     ]
@@ -449,8 +687,31 @@ def main():
         (module_dir / f"{name}.bin").write_bytes(raw)
         collect(raw)
 
-    # Friendly names for logical modules/actions (natural names; no mod./action. prefix).
-    # DLL vs block is a resolve/performance detail, not a naming namespace.
+    # Specialized native surfaces (editor-open definition blocks).
+    surfaces = build_native_surfaces(t)
+    surface_dir = ROOT / "atomic_surface_blocks"
+    surface_dir.mkdir(exist_ok=True)
+    for old in surface_dir.glob("*.bin"):
+        old.unlink()
+
+    # Facets of surfaces are also logical modules (firstchild of the surface).
+    for sname, sdef in surfaces.items():
+        for fname, (fkey, fraw) in sdef["facets"].items():
+            mod_name = f"{sname}.{fname}" if not fname.startswith(sname) else fname
+            # keep short natural names for facets
+            modules[fname if fname not in modules else mod_name] = (fkey, fraw)
+            logical.add(fkey)
+            collect(fraw)
+            (module_dir / f"{fname}.bin").write_bytes(fraw)
+        (surface_dir / f"{sname}.bin").write_bytes(sdef["block"])
+        collect(sdef["block"])
+
+    # Friendly names for surfaces + facets (natural; no prefix).
+    for sname, sdef in surfaces.items():
+        # surface itself is opened via native token; still name the native.
+        for fname, (fkey, _fraw) in sdef["facets"].items():
+            if fname not in t:
+                t[fname] = fkey
     for name, (key, _raw) in modules.items():
         if name not in t:
             t[name] = key
@@ -461,13 +722,19 @@ def main():
     print("instruction_names", n_names)
 
     name_by_token = {token: name for name, token in t.items()}
+    # Classify composite vs leaf for manifest readability.
+    composite = {"camera", "input", "zoom", "hud", "editor"}
     manifest = {
         "program_key": PROGRAM_KEY.hex(),
         "native": {},
         "actions": {},
         "modules": {},
+        "surfaces": {},
         "modules_inlined": False,
-        "composition": "bare logical module tokens in stream (no exec)",
+        "composition": (
+            "bare logical tokens; specialized composites + specialized natives "
+            "decompose into named firstchild part/surface blocks"
+        ),
     }
     for tok in used:
         if tok in logical:
@@ -476,15 +743,31 @@ def main():
         if name is None:
             raise RuntimeError("unknown native token " + tok.hex())
         manifest["native"][name] = tok.hex()
+    # Ensure surface natives are listed even if only referenced via surface files.
+    for sdef in surfaces.values():
+        n = sdef["native"]
+        manifest["native"][n] = sdef["token"].hex()
     for name, raw in actions.items():
         manifest["actions"][name] = {
             "key": action_keys[name].hex(),
             "hash": hashlib.sha256(raw).hexdigest(),
         }
     for name, (key, raw) in modules.items():
-        manifest["modules"][name] = {
+        entry = {
             "key": key.hex(),
             "hash": hashlib.sha256(raw).hexdigest(),
+        }
+        if name not in composite:
+            entry["role"] = "part"
+        else:
+            entry["role"] = "module"
+        manifest["modules"][name] = entry
+    for sname, sdef in surfaces.items():
+        manifest["surfaces"][sname] = {
+            "native": sdef["native"],
+            "token": sdef["token"].hex(),
+            "hash": hashlib.sha256(sdef["block"]).hexdigest(),
+            "facets": [fname for fname in sdef["facets"].keys()],
         }
     manifest["first_hash"] = hashlib.sha256(first).hexdigest()
     manifest["program_hash"] = hashlib.sha256(program_raw).hexdigest()
@@ -495,10 +778,16 @@ def main():
     print("program", manifest["program_hash"], len(program_raw), len(program),
           "orchestrator (bare module tokens)")
     for name, value in manifest["actions"].items():
-        print("action", name, value["hash"][:16])
+        print("action", name, value["hash"][:16], "size", len(actions[name]))
     for name, value in manifest["modules"].items():
-        print("module", name, value["key"][:16], "->", value["hash"][:16])
+        role = value.get("role", "?")
+        print(role, name, value["key"][:16], "->", value["hash"][:16],
+              "size", len(modules[name][1]))
+    for name, value in manifest["surfaces"].items():
+        print("surface", name, "native", value["native"], "->", value["hash"][:16],
+              "facets", len(value["facets"]))
     print("natives", len(manifest["native"]))
+    print("modules+parts", len(manifest["modules"]))
 
 
 if __name__ == "__main__":

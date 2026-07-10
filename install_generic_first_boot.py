@@ -163,10 +163,17 @@ def main():
                for name in manifest["actions"]}
     modules = {name: (ROOT / "atomic_module_blocks" / f"{name}.bin").read_bytes()
                for name in manifest.get("modules", {})}
+    surfaces = {}
+    for name, meta in manifest.get("surfaces", {}).items():
+        raw = (ROOT / "atomic_surface_blocks" / f"{name}.bin").read_bytes()
+        if hashlib.sha256(raw).hexdigest() != meta["hash"]:
+            raise RuntimeError(f"surface hash mismatch for {name}")
+        surfaces[name] = raw
     blocks = {"first_block.bin": first, "first_program_block.bin": program,
               "first_bootstrap_block.bin": bootstrap}
     blocks.update({f"atomic_action_blocks/{name}.bin": raw for name, raw in actions.items()})
     blocks.update({f"atomic_module_blocks/{name}.bin": raw for name, raw in modules.items()})
+    blocks.update({f"atomic_surface_blocks/{name}.bin": raw for name, raw in surfaces.items()})
     require_atomic_mods(manifest, blocks)
 
     if hashlib.sha256(first).hexdigest() != manifest["first_hash"]:
@@ -226,6 +233,18 @@ def main():
             add_edge(sock, module_key, module_hash)
             set_override(sock, identity, module_key, module_hash)
 
+        # Specialized native surfaces: override native token -> definition block.
+        # find(native) still runs the DLL; editor resolve uses override for content.
+        for name, raw in surfaces.items():
+            surface_hash = upload(sock, raw)
+            expected = manifest["surfaces"][name]
+            if surface_hash.hex() != expected["hash"]:
+                raise RuntimeError(f"surface hash mismatch for {name}")
+            native_token = bytes.fromhex(expected["token"])
+            add_edge(sock, native_token, surface_hash)
+            set_override(sock, identity, native_token, surface_hash)
+            invalidate_children_cache(native_token)
+
         program_hash = upload(sock, program)
         first_hash = upload(sock, first)
         add_edge(sock, program_key, program_hash)
@@ -263,6 +282,8 @@ def main():
         print(f"action {name:6}:", value["hash"])
     for name, value in manifest.get("modules", {}).items():
         print(f"module {name:6}:", value["hash"])
+    for name, value in manifest.get("surfaces", {}).items():
+        print(f"surface {name}:", value["hash"], "facets", len(value.get("facets", [])))
 
 
 if __name__ == "__main__":
