@@ -28,7 +28,7 @@ extern __declspec(dllimport) void cvm_firstchild(H p, H c);
 static H id;
 
 /* Multi-entry LRU cache */
-#define CACHE_SLOTS 32
+#define CACHE_SLOTS 256
 
 typedef struct {
     H key;
@@ -377,15 +377,24 @@ __declspec(dllexport) void cvm_override_cache_invalidate(const H k) {
     }
 }
 
+extern __declspec(dllexport) u32 cvm_children(const H parent, H *out, u32 cap);
+
 __declspec(dllexport) int cvm_resolve_payload_hash(const H k, H h) {
     /* Hot path: every bare logical token / views row resolve hits this.
-     * No printf on HIT — modular composition resolves dozens of blocks/frame. */
+     * Cold miss used to always uget() on the main conn (full RTT, ~1s feel)
+     * and 32-slot LRU thrashed when switching pan <-> rmb actions.
+     * Path: block cache -> override cache (hit/miss) -> children disk cache
+     * -> network firstchild only if needed -> load bytes (disk file first). */
     if (cvm_cache_hit(k)) {
         memcpy(h, slots[primary_idx].hash, 32);
-        { static int _vc = 0; if (++_vc >= 256) { _vc = 0; cvm_cache_verify_async(); } }
+        { static int _vc = 0; if (++_vc >= 512) { _vc = 0; cvm_cache_verify_async(); } }
         return 1;
     }
-    if (!uget(k, h)) cvm_firstchild((u8*)k, h);
+    if (!cvm_has_override(k, h)) {
+        H kid;
+        if (cvm_children(k, &kid, 1) >= 1) memcpy(h, kid, 32);
+        else cvm_firstchild((u8*)k, h);
+    }
     cvm_cache_load(k, h);
     return 1;
 }
