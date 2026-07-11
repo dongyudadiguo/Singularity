@@ -4,13 +4,13 @@
  * Opens or focuses key; starts drag on it. Pushes u32 index or 0xffffffff.
  */
 __declspec(dllexport) void run(void){
-    H id; if (!payload_id(id, 0, 0)) { cont(); return; }
+    const u8 *id; u32 id_len; if (!payload_id(&id, &id_len, 0, 0)) { cont(); return; }
     float ly = *(float*)pop(4), lx = *(float*)pop(4);
     int parent = *(int*)pop(4);
     float y = *(float*)pop(4), x = *(float*)pop(4);
     u8 key[32]; memcpy(key, pop(32), 32);
     u32 out = 0xffffffffu;
-    Table *tp = load_or_empty(id, 1);
+    Table *tp = load_or_empty(id, id_len, 1);
     if (!tp || zero_key(key)) { push(&out, 4); cont(); return; }
     Table t = *tp;
     int found = -1;
@@ -29,7 +29,7 @@ __declspec(dllexport) void run(void){
         t.views[i].link_x = lx; t.views[i].link_y = ly;
         t.active = i; t.dragging = (int)i; out = i;
     }
-    store_table(id, &t);
+    store_table(id, id_len, &t);
     push(&out, 4);
     cont();
 }

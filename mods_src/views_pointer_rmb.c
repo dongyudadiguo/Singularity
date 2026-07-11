@@ -1,8 +1,8 @@
 #include "views_common.h"
 /* stack mx,my; open hash-carrier payload or token itself as linked view */
 __declspec(dllexport) void run(void){
-    H id; const u8 *args; u32 an;
-    if (!payload_id(id, &args, &an)) { cont(); return; }
+    const u8 *id; u32 id_len; const u8 *args; u32 an;
+    if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
     float my=*(float*)pop(4), mx=*(float*)pop(4);
     float title_h=32.0f, row_h=24.0f; u32 row_count=256;
     if (an>=4) title_h=*(float*)args;
@@ -11,7 +11,7 @@ __declspec(dllexport) void run(void){
     if (an>=16) row_count=*(u32*)(args+12);
     else if (an>=12) row_count=*(u32*)(args+8);
     u32 handled=0;
-    Table *tp=load_or_empty(id,0);
+    Table *tp=load_or_empty(id, id_len, 0);
     if (!tp) { push(&handled,4); cont(); return; }
     Table t=*tp;
     for (int i=(int)t.count-1;i>=0;i--) {
@@ -19,7 +19,7 @@ __declspec(dllexport) void run(void){
         float width=title_text_width((u32)i,v);
         if (mx>=v->x && mx<v->x+width && my>=v->y-title_h && my<v->y) {
             t.active=(u32)i; t.dragging=i; handled=1;
-            store_table(id,&t); push(&handled,4); cont(); return;
+            store_table(id, id_len, &t); push(&handled,4); cont(); return;
         }
     }
     for (int i=(int)t.count-1;i>=0;i--) {
@@ -53,5 +53,5 @@ __declspec(dllexport) void run(void){
         }
         handled=1; break;
     }
-    store_table(id,&t); push(&handled,4); cont();
+    store_table(id, id_len, &t); push(&handled,4); cont();
 }

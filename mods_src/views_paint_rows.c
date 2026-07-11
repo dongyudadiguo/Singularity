@@ -79,8 +79,8 @@ static void row_summary(const u8 *tok, const u8 *payload, u32 pn, char *sum, u32
 
 /* payload: views_var[32] — draw instruction rows + <end> for each view */
 __declspec(dllexport) void run(void){
-    H id; if (!payload_id(id,0,0)) { cont(); return; }
-    Table *t = load_table(id); if (!t) { cont(); return; }
+    const u8 *id; u32 id_len; if (!payload_id(&id, &id_len, 0, 0)) { cont(); return; }
+    Table *t = load_table(id, id_len); if (!t) { cont(); return; }
     for (u32 vi = 0; vi < t->count; vi++) {
         View *v = &t->views[vi];
         if (!v->used) continue;

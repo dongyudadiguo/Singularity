@@ -214,39 +214,55 @@ static float row_hit_width(const View *v, int row) {
     }
     return row_text_width(instr);
 }
-static u8 *blob(const H id, u32 *size_out) {
+/* views var id is arbitrary-size binary (prefer plaintext strings).
+ * Payload layout for views_* mods:
+ *   id_len[u32] + id[id_len] + op_args...
+ * Legacy: if first u32 is not a plausible id_len, treat first 32 bytes as id.
+ */
+static u8 *blob(const u8 *id, u32 id_len, u32 *size_out) {
     u32 size = 0;
-    u8 *p = cvm_var_get(id, 32, &size);
+    u8 *p = cvm_var_get(id, id_len, &size);
     if (!p || size < (u32)sizeof(Table)) return 0;
     if (size_out) *size_out = size;
     return p;
 }
-static Table *load_table(const H id) {
-    return (Table *)blob(id, 0);
+static Table *load_table(const u8 *id, u32 id_len) {
+    return (Table *)blob(id, id_len, 0);
 }
-static void store_table(const H id, Table *t) {
-    cvm_var_write(id, 32, (const u8 *)t, (u32)sizeof(Table));
+static void store_table(const u8 *id, u32 id_len, Table *t) {
+    cvm_var_write(id, id_len, (const u8 *)t, (u32)sizeof(Table));
 }
-/* payload must start with views var id[32]; returns 0 if short */
-static int payload_id(H id, const u8 **args, u32 *an) {
+/* Parse payload id. Writes pointer into payload buffer (valid for this call). */
+static int payload_id(const u8 **id_out, u32 *id_len_out, const u8 **args, u32 *an) {
     u8 *p = cvm_payload();
     u32 n = cvm_payload_size();
+    if (n < 4) return 0;
+    u32 id_len = *(u32 *)p;
+    if (id_len > 0 && id_len <= 256 && n >= 4 + id_len) {
+        *id_out = p + 4;
+        *id_len_out = id_len;
+        if (args) *args = p + 4 + id_len;
+        if (an) *an = n - 4 - id_len;
+        return 1;
+    }
+    /* legacy fixed-32 id */
     if (n < 32) return 0;
-    memcpy(id, p, 32);
+    *id_out = p;
+    *id_len_out = 32;
     if (args) *args = p + 32;
     if (an) *an = n - 32;
     return 1;
 }
-static Table *load_or_empty(const H id, int create) {
-    Table *tp = load_table(id);
+static Table *load_or_empty(const u8 *id, u32 id_len, int create) {
+    Table *tp = load_table(id, id_len);
     if (tp) return tp;
     if (!create) return 0;
-    cvm_var_set(id, 32, (u32)sizeof(Table));
+    cvm_var_set(id, id_len, (u32)sizeof(Table));
     Table empty;
     memset(&empty, 0, sizeof(empty));
     empty.dragging = -1;
-    cvm_var_write(id, 32, (const u8 *)&empty, (u32)sizeof(Table));
-    return load_table(id);
+    cvm_var_write(id, id_len, (const u8 *)&empty, (u32)sizeof(Table));
+    return load_table(id, id_len);
 }
 
 /* Resolve open target for instruction at offset o in cached block.

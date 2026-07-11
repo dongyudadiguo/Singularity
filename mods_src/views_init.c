@@ -1,8 +1,8 @@
 #include "views_common.h"
 /* init: args key[32], f32 x, f32 y — reset table with one view */
 __declspec(dllexport) void run(void){
-    H id; const u8 *args; u32 an;
-    if (!payload_id(id, &args, &an) || an < 40) { cont(); return; }
+    const u8 *id; u32 id_len; const u8 *args; u32 an;
+    if (!payload_id(&id, &id_len, &args, &an) || an < 40) { cont(); return; }
     cvm_var_set(id, 32, (u32)sizeof(Table));
     Table t; memset(&t, 0, sizeof(t));
     t.dragging = -1; t.count = 1; t.active = 0;
@@ -11,6 +11,6 @@ __declspec(dllexport) void run(void){
     memcpy(t.views[0].key, args, 32);
     t.views[0].x = *(float*)(args+32);
     t.views[0].y = *(float*)(args+36);
-    store_table(id, &t);
+    store_table(id, id_len, &t);
     cont();
 }

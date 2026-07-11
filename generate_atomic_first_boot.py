@@ -14,21 +14,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PROGRAM_KEY = hashlib.sha256(b"#SingularityAtomicProgram").digest()
-INPUT_VAR = hashlib.sha256(b"atomic.editor.input").digest()
-CAM_X = hashlib.sha256(b"atomic.cam.x").digest()
-CAM_Y = hashlib.sha256(b"atomic.cam.y").digest()
-CAM_Z = hashlib.sha256(b"atomic.cam.z").digest()
-GRAB_MX = hashlib.sha256(b"atomic.cam.grab_mx").digest()
-GRAB_MY = hashlib.sha256(b"atomic.cam.grab_my").digest()
-GRAB_CX = hashlib.sha256(b"atomic.cam.grab_cx").digest()
-GRAB_CY = hashlib.sha256(b"atomic.cam.grab_cy").digest()
-GRAB_VX = hashlib.sha256(b"atomic.cam.grab_vx").digest()
-GRAB_VY = hashlib.sha256(b"atomic.cam.grab_vy").digest()
-PAN_ACTIVE = hashlib.sha256(b"atomic.cam.pan_active").digest()
-DRAG_ANCHORED = hashlib.sha256(b"atomic.cam.drag_anchored").digest()
-PREV_LMB = hashlib.sha256(b"atomic.input.prev_lmb").digest()
-PREV_RMB = hashlib.sha256(b"atomic.input.prev_rmb").digest()
-VIEWS = hashlib.sha256(b"atomic.views.table").digest()
+# Variable ids are plaintext UTF-8 strings (arbitrary binary still supported by vmvar).
+# Prefer readable names so the editor shows id text instead of hex digests.
+INPUT_VAR = b"atomic.editor.input"
+CAM_X = b"atomic.cam.x"
+CAM_Y = b"atomic.cam.y"
+CAM_Z = b"atomic.cam.z"
+GRAB_MX = b"atomic.cam.grab_mx"
+GRAB_MY = b"atomic.cam.grab_my"
+GRAB_CX = b"atomic.cam.grab_cx"
+GRAB_CY = b"atomic.cam.grab_cy"
+GRAB_VX = b"atomic.cam.grab_vx"
+GRAB_VY = b"atomic.cam.grab_vy"
+PAN_ACTIVE = b"atomic.cam.pan_active"
+DRAG_ANCHORED = b"atomic.cam.drag_anchored"
+PREV_LMB = b"atomic.input.prev_lmb"
+PREV_RMB = b"atomic.input.prev_rmb"
+VIEWS = b"atomic.views.table"
 
 
 def mod_key(name: str) -> bytes:
@@ -141,9 +143,14 @@ def alloc_var(t, var_id, size):
     return (t["var_set_payload"], u32(len(var_id)) + var_id + u32(size))
 
 
+def views_var_payload(args=b""):
+    """Encode views table var id as id_len[u32] + id + op args."""
+    return u32(len(VIEWS)) + VIEWS + args
+
+
 def views_call(t, op_name, args=b""):
-    """Call a split views_* native. Payload is views_var_id[32] + op args (no op code)."""
-    return (t[op_name], VIEWS + args)
+    """Call a split views_* native. Payload is id_len+id + op args (no op code)."""
+    return (t[op_name], views_var_payload(args))
 
 
 def cond_action(t, key):
@@ -178,36 +185,36 @@ def mouse_edge(t, mask, prev_var):
 def build_begin_pan(t):
     return [
         (t["mouse_f"], b""),
-        (t["var_write_payload"], GRAB_MY),
-        (t["var_write_payload"], GRAB_MX),
-        (t["var_read_payload"], CAM_X), (t["var_write_payload"], GRAB_CX),
-        (t["var_read_payload"], CAM_Y), (t["var_write_payload"], GRAB_CY),
-        (t["const_payload"], u32(1)), (t["var_write_payload"], PAN_ACTIVE),
+        (t["var_write_payload"], u32(len(GRAB_MY)) + GRAB_MY),
+        (t["var_write_payload"], u32(len(GRAB_MX)) + GRAB_MX),
+        (t["var_read_payload"], CAM_X), (t["var_write_payload"], u32(len(GRAB_CX)) + GRAB_CX),
+        (t["var_read_payload"], CAM_Y), (t["var_write_payload"], u32(len(GRAB_CY)) + GRAB_CY),
+        (t["const_payload"], u32(1)), (t["var_write_payload"], u32(len(PAN_ACTIVE)) + PAN_ACTIVE),
     ]
 
 
 def build_end_pan(t):
     return [
-        (t["const_payload"], u32(0)), (t["var_write_payload"], PAN_ACTIVE),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(PAN_ACTIVE)) + PAN_ACTIVE),
     ]
 
 
 def build_begin_drag_anchor(t):
     return [
         (t["mouse_f"], b""),
-        (t["var_write_payload"], GRAB_MY),
-        (t["var_write_payload"], GRAB_MX),
+        (t["var_write_payload"], u32(len(GRAB_MY)) + GRAB_MY),
+        (t["var_write_payload"], u32(len(GRAB_MX)) + GRAB_MX),
         bare(PART_GET_DRAG_XY),
-        (t["var_write_payload"], GRAB_VY),
-        (t["var_write_payload"], GRAB_VX),
-        (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
+        (t["var_write_payload"], u32(len(GRAB_VY)) + GRAB_VY),
+        (t["var_write_payload"], u32(len(GRAB_VX)) + GRAB_VX),
+        (t["const_payload"], u32(1)), (t["var_write_payload"], u32(len(DRAG_ANCHORED)) + DRAG_ANCHORED),
     ]
 
 
 def build_end_drag(t):
     return [
         bare(PART_DRAG_END),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(DRAG_ANCHORED)) + DRAG_ANCHORED),
     ]
 
 
@@ -235,16 +242,16 @@ def build_editor_actions(t):
             (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
             (t["block_insert_stack"], b""),
             # clear input: write 256 zero bytes
-            (t["const_payload"], bytes(256)), (t["var_write_payload"], INPUT_VAR),
+            (t["const_payload"], bytes(256)), (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
             (t["jump_payload"], PROGRAM_KEY),
         ]),
         "backspace": make_block([
             (t["var_read_payload"], INPUT_VAR),
             (t["string_backspace"], u32(256)),
-            (t["var_write_payload"], INPUT_VAR),
+            (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
         ]),
         "clear": make_block([
-            (t["const_payload"], bytes(256)), (t["var_write_payload"], INPUT_VAR),
+            (t["const_payload"], bytes(256)), (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
         ]),
     }
 
@@ -260,7 +267,7 @@ def part_pan_x(t):
         (t["var_read_payload"], GRAB_MX), (t["f32_sub"], b""),
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_sub"], b""),
-        (t["var_write_payload"], CAM_X),
+        (t["var_write_payload"], u32(len(CAM_X)) + CAM_X),
     ]
 
 
@@ -271,7 +278,7 @@ def part_pan_y(t):
         (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_sub"], b""),
-        (t["var_write_payload"], CAM_Y),
+        (t["var_write_payload"], u32(len(CAM_Y)) + CAM_Y),
     ]
 
 
@@ -306,7 +313,7 @@ def part_zoom_z(t):
         (t["f32_mul"], b""),
         (t["f32_clamp"], f32(0.15) + f32(6.0)),
         (t["dup_u32"], b""),
-        (t["var_write_payload"], CAM_Z),
+        (t["var_write_payload"], u32(len(CAM_Z)) + CAM_Z),
         (t["f32_div"], b""),  # stack: ratio
     ]
 
@@ -323,7 +330,7 @@ def part_zoom_x(t):
         (t["world_mouse"], b""),
         (t["drop_u32"], b""),
         (t["f32_add"], b""),
-        (t["var_write_payload"], CAM_X),
+        (t["var_write_payload"], u32(len(CAM_X)) + CAM_X),
     ]
 
 
@@ -340,7 +347,7 @@ def part_zoom_y(t):
         (t["swap_u32"], b""),
         (t["drop_u32"], b""),
         (t["f32_add"], b""),
-        (t["var_write_payload"], CAM_Y),
+        (t["var_write_payload"], u32(len(CAM_Y)) + CAM_Y),
     ]
 
 
@@ -367,7 +374,7 @@ def part_typein(t):
         (t["var_read_payload"], INPUT_VAR),
         (t["text_input"], b""),
         (t["string_append"], u32(256) + u32(256)),
-        (t["var_write_payload"], INPUT_VAR),
+        (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
         (t["swap_u32"], b""), (t["drop_u32"], b""),
@@ -502,7 +509,7 @@ def build_drag(t, action_keys):
 def build_rmb(t, action_keys):
     return [
         bare(PART_RMB_OPEN),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(DRAG_ANCHORED)) + DRAG_ANCHORED),
         bare(action_keys["begin_drag_anchor"]),
     ]
 
@@ -701,13 +708,13 @@ def main():
         alloc_var(t, PAN_ACTIVE, 4), alloc_var(t, DRAG_ANCHORED, 4),
         alloc_var(t, PREV_LMB, 4), alloc_var(t, PREV_RMB, 4),
         alloc_var(t, VIEWS, 2320),
-        (t["const_payload"], f32(640.0)), (t["var_write_payload"], CAM_X),
-        (t["const_payload"], f32(360.0)), (t["var_write_payload"], CAM_Y),
-        (t["const_payload"], f32(1.0)), (t["var_write_payload"], CAM_Z),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], PAN_ACTIVE),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], PREV_LMB),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], PREV_RMB),
+        (t["const_payload"], f32(640.0)), (t["var_write_payload"], u32(len(CAM_X)) + CAM_X),
+        (t["const_payload"], f32(360.0)), (t["var_write_payload"], u32(len(CAM_Y)) + CAM_Y),
+        (t["const_payload"], f32(1.0)), (t["var_write_payload"], u32(len(CAM_Z)) + CAM_Z),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(PAN_ACTIVE)) + PAN_ACTIVE),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(DRAG_ANCHORED)) + DRAG_ANCHORED),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(PREV_LMB)) + PREV_LMB),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(PREV_RMB)) + PREV_RMB),
         (PROGRAM_KEY, b""),
     ])
     program_raw = make_block(program)

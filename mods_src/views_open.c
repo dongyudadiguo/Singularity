@@ -1,10 +1,10 @@
 #include "views_common.h"
 /* args: key[32], f32 x,y, i32 parent, f32 lx,ly -> u32 index or 0xffffffff */
 __declspec(dllexport) void run(void){
-    H id; const u8 *args; u32 an;
-    if (!payload_id(id, &args, &an)) { cont(); return; }
+    const u8 *id; u32 id_len; const u8 *args; u32 an;
+    if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
     u32 out = 0xffffffffu;
-    Table *tp = load_or_empty(id, 1);
+    Table *tp = load_or_empty(id, id_len, 1);
     if (!tp || an < 52) { push(&out,4); cont(); return; }
     Table t=*tp;
     const u8 *key = args;
@@ -23,5 +23,5 @@ __declspec(dllexport) void run(void){
         t.views[i].link_x=lx; t.views[i].link_y=ly;
         t.active=i; t.dragging=(int)i; out=i;
     }
-    store_table(id,&t); push(&out,4); cont();
+    store_table(id, id_len, &t); push(&out,4); cont();
 }

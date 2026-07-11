@@ -5,15 +5,15 @@
  * Pure hit test — no state mutation. Recipes decide set_active/open/drag.
  */
 __declspec(dllexport) void run(void){
-    H id; const u8 *args; u32 an;
-    if (!payload_id(id, &args, &an)) { cont(); return; }
+    const u8 *id; u32 id_len; const u8 *args; u32 an;
+    if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
     float my = *(float*)pop(4), mx = *(float*)pop(4);
     float title_h = 32.0f, row_h = 24.0f; u32 row_count = 256;
     if (an >= 4) title_h = *(float*)args;
     if (an >= 8) row_h = *(float*)(args + 4);
     if (an >= 12) row_count = *(u32*)(args + 8);
     int vhit = -1, rhit = -1, zone = 0;
-    Table *tp = load_table(id);
+    Table *tp = load_table(id, id_len);
     if (tp) {
         Table t = *tp;
         for (int i = (int)t.count - 1; i >= 0; i--) {

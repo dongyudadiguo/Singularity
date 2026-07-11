@@ -4,16 +4,16 @@
  * Else pop u32 cursor from stack.
  */
 __declspec(dllexport) void run(void){
-    H id; const u8 *args; u32 an;
-    if (!payload_id(id, &args, &an)) { cont(); return; }
+    const u8 *id; u32 id_len; const u8 *args; u32 an;
+    if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
     u32 cur;
     if (an >= 4) cur = *(u32*)args;
     else cur = *(u32*)pop(4);
-    Table *tp = load_table(id); if (!tp) { cont(); return; }
+    Table *tp = load_table(id, id_len); if (!tp) { cont(); return; }
     Table t = *tp;
     if (t.active < t.count && t.views[t.active].used) {
         t.views[t.active].cursor = cur;
-        store_table(id, &t);
+        store_table(id, id_len, &t);
     }
     cont();
 }
