@@ -8,8 +8,9 @@ from pathlib import Path
 # alias action — place the composition (module/part/action recipe) instead.
 # Example: string_*_var is forbidden; use stack string_append/string_backspace
 # + var_read_payload/var_write_payload (clear = const zeros + var_write).
-# Mega views op-table / views_render / registry_* forbidden in first-boot;
-# use split views_* + views_paint_* + name_* natives.
+# Forbidden specialized: mega views, views_render, registry_*, string_*_var,
+# mouse_button_pressed, views_pointer_*, views_cursor_*. Prefer apply/pick +
+# table field ops + paint_*; cond_payload/name_*/platform gfx are mid-low OK.
 
 ROOT = Path(__file__).resolve().parent
 PROGRAM_KEY = hashlib.sha256(b"#SingularityAtomicProgram").digest()
@@ -54,8 +55,8 @@ PART_MATCH = part_key("match")
 PART_NAV = part_key("nav")
 PART_CURSOR_ADD = part_key("views.cursor_add")
 PART_CURSOR_DEC = part_key("views.cursor_dec")
-PART_POINTER_LMB = part_key("views.pointer_lmb")
-PART_POINTER_RMB = part_key("views.pointer_rmb")
+PART_POINTER_LMB = part_key("views.apply_lmb")
+PART_POINTER_RMB = part_key("views.apply_rmb")
 PART_DRAG_END = part_key("views.drag_end")
 PART_ENSURE = part_key("views.ensure")
 PART_RENDER_DRAW = part_key("views.render_draw")
@@ -527,66 +528,38 @@ def sample_views(t, op_name, args=b""):
 
 
 def build_native_surfaces(t):
-    """Map surface_name -> (native_token, surface_block_bytes, facet_modules).
-
-    facet_modules: name -> (key, raw) extra logical blocks referenced by surface.
-    """
-    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
+    """Thin table + paint surfaces. Integrated pointer/cursor ops are recipes."""
+    hit_args = f32(32.0) + f32(24.0) + u32(256)
     ensure_args = PROGRAM_KEY + f32(40.0) + f32(70.0)
 
-    # Facet keys (logical). Display names are plain: ensure, pointer_rmb, ...
-    # Each facet is a dedicated native (no mega views op-table).
     facets = {
         "ensure": (part_key("views.ensure"), sample_views(t, "views_ensure", ensure_args)),
+        "pick": (part_key("views.pick"), sample_views(t, "views_pick", hit_args)),
+        "apply_lmb": (part_key("views.apply_lmb"), sample_views(t, "views_apply_lmb", hit_args)),
+        "apply_rmb": (part_key("views.apply_rmb"), sample_views(t, "views_apply_rmb", hit_args)),
+        "open_key": (part_key("views.open_key"), sample_views(t, "views_open_key")),
+        "select_row": (part_key("views.select_row"), sample_views(t, "views_select_row")),
+        "set_active_drag": (part_key("views.set_active_drag"), sample_views(t, "views_set_active_drag")),
         "active_key": (part_key("views.active_key"), sample_views(t, "views_active_key")),
         "active_cursor": (part_key("views.active_cursor"), sample_views(t, "views_active_cursor")),
-        "cursor_add": (part_key("views.cursor_add"), sample_views(t, "views_cursor_add", i32(1))),
-        "cursor_dec": (part_key("views.cursor_dec"), sample_views(t, "views_cursor_dec")),
-        "pointer_lmb": (part_key("views.pointer_lmb"), sample_views(t, "views_pointer_lmb", hit_args)),
-        "pointer_rmb": (part_key("views.pointer_rmb"), sample_views(t, "views_pointer_rmb", hit_args)),
+        "set_cursor_active": (part_key("views.set_cursor_active"), sample_views(t, "views_set_cursor_active")),
         "drag_end": (part_key("views.drag_end"), sample_views(t, "views_drag_end")),
         "get_drag_xy": (part_key("views.get_drag_xy"), sample_views(t, "views_get_drag_xy")),
         "set_drag_xy": (part_key("views.set_drag_xy"), sample_views(t, "views_set_drag_xy")),
-        "open": (part_key("views.open"), sample_views(
-            t, "views_open", PROGRAM_KEY + f32(120.0) + f32(90.0) + i32(-1) + f32(80.0) + f32(10.0))),
-        "init": (part_key("views.init"), sample_views(t, "views_init", PROGRAM_KEY + f32(40.0) + f32(70.0))),
-        "count": (part_key("views.count"), sample_views(t, "views_count")),
-        "active": (part_key("views.active"), sample_views(t, "views_active")),
-        "set_active": (part_key("views.set_active"), sample_views(t, "views_set_active", u32(0))),
-        "get_xy": (part_key("views.get_xy"), sample_views(t, "views_get_xy", u32(0))),
-        "set_xy": (part_key("views.set_xy"), sample_views(t, "views_set_xy", u32(0) + f32(0.0) + f32(0.0))),
-        "get_key": (part_key("views.get_key"), sample_views(t, "views_get_key", u32(0))),
-        "get_cursor": (part_key("views.get_cursor"), sample_views(t, "views_get_cursor", u32(0))),
-        "set_cursor": (part_key("views.set_cursor"), sample_views(t, "views_set_cursor", u32(0) + u32(0))),
-        "drag_begin": (part_key("views.drag_begin"), sample_views(t, "views_drag_begin", u32(0))),
-        "drag_step": (part_key("views.drag_step"), sample_views(t, "views_drag_step", f32(0.0) + f32(0.0))),
-        "hit_title": (part_key("views.hit_title"), sample_views(t, "views_hit_title", f32(32.0))),
-        "hit_row": (part_key("views.hit_row"), sample_views(t, "views_hit_row", f32(24.0) + u32(256))),
-        "move_by": (part_key("views.move_by"), sample_views(t, "views_move_by", u32(0) + f32(0.0) + f32(0.0))),
-        "get_dragging": (part_key("views.get_dragging"), sample_views(t, "views_get_dragging")),
-        "set_cursor_active": (part_key("views.set_cursor_active"), sample_views(t, "views_set_cursor_active", u32(0))),
     }
-
-    # Surface body: only bare facet tokens (decomposable firstchild list).
-    # Order = primary specialized API surface first, then secondary ops.
     surface_order = [
-        "ensure", "pointer_lmb", "pointer_rmb", "get_drag_xy", "set_drag_xy",
-        "drag_end", "active_key", "active_cursor", "cursor_add", "cursor_dec",
-        "open", "init", "count", "active", "set_active",
-        "get_xy", "set_xy", "get_key", "get_cursor", "set_cursor",
-        "drag_begin", "drag_step", "hit_title", "hit_row", "move_by",
-        "get_dragging", "set_cursor_active",
+        "ensure", "pick", "apply_lmb", "apply_rmb", "open_key", "select_row",
+        "set_active_drag", "active_key", "active_cursor", "set_cursor_active",
+        "drag_end", "get_drag_xy", "set_drag_xy",
     ]
     views_surface = make_block([bare(facets[n][0]) for n in surface_order])
 
-    # render_draw: compose paint primitives (no mega views_render DLL).
     render_leaf_key = part_key("views.render_draw")
     render_leaf = make_block([
         views_call(t, "views_paint_links"),
         views_call(t, "views_paint_titles"),
         views_call(t, "views_paint_rows"),
     ])
-    # Optional surface listing the three paint natives as firstchildren.
     paint_facets = {
         "paint_links": (part_key("views.paint_links"), sample_views(t, "views_paint_links")),
         "paint_titles": (part_key("views.paint_titles"), sample_views(t, "views_paint_titles")),
@@ -596,7 +569,6 @@ def build_native_surfaces(t):
     paint_order = ["paint_links", "paint_titles", "paint_rows", "render_draw"]
     paint_surface = make_block([bare(paint_facets[n][0]) for n in paint_order])
 
-    # Surface anchor is views_ensure (seed) — not a mega op-table DLL.
     surfaces = {
         "views": {
             "native": "views_ensure",
@@ -624,16 +596,16 @@ def main():
         "text_input", "string_append", "string_backspace",
         "block_insert_stack", "block_delete",
         "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down",
-        "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
+        "i32_to_f32", "i32_add", "i32_min", "i32_max", "eq",
+        "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
         "world_mouse", "drop_u32", "swap_u32", "dup_u32",
         "views_paint_links", "views_paint_titles", "views_paint_rows",
-        "views_ensure", "views_active_key", "views_active_cursor", "views_cursor_add",
-        "views_cursor_dec", "views_pointer_lmb", "views_pointer_rmb", "views_drag_end",
-        "views_get_drag_xy", "views_set_drag_xy", "views_open", "views_init", "views_count",
-        "views_active", "views_set_active", "views_get_xy", "views_set_xy", "views_get_key",
-        "views_get_cursor", "views_set_cursor", "views_drag_begin", "views_drag_step",
-        "views_hit_title", "views_hit_row", "views_move_by", "views_get_dragging",
-        "views_set_cursor_active",
+        "views_ensure", "views_active_key", "views_active_cursor",
+        "views_set_cursor_active", "views_drag_end",
+        "views_get_drag_xy", "views_set_drag_xy",
+        "views_apply_lmb", "views_apply_rmb", "views_pick", "views_open_key",
+        "views_select_row", "views_set_active_drag",
+        "block_resolve", "block_instr_count", "instr_open_at",
         "block_select_stack", "block_offset_at_index", "measure_text", "not", "and",
         "screen_size",
     }
@@ -683,6 +655,24 @@ def main():
         "zoom": (MOD_ZOOM, make_block(mod_zoom(t, action_keys["zoom_apply"]))),
         "hud": (MOD_HUD, make_block(mod_hud(t))),
         "editor": (MOD_EDITOR, make_block(mod_editor(t))),
+        # cursor_add/dec: composition (no specialized views_cursor_* natives)
+        "cursor_add": (PART_CURSOR_ADD, make_block([
+            views_call(t, "views_active_cursor"),
+            (t["const_payload"], i32(1)), (t["i32_add"], b""),
+            (t["const_payload"], i32(0)), (t["i32_max"], b""),
+            # clamp high: resolve active key block, count instrs, min(cur, count)
+            views_call(t, "views_active_key"),
+            (t["block_resolve"], b""),
+            (t["block_instr_count"], b""),
+            (t["i32_min"], b""),
+            views_call(t, "views_set_cursor_active"),
+        ])),
+        "cursor_dec": (PART_CURSOR_DEC, make_block([
+            views_call(t, "views_active_cursor"),
+            (t["const_payload"], i32(-1)), (t["i32_add"], b""),
+            (t["const_payload"], i32(0)), (t["i32_max"], b""),
+            views_call(t, "views_set_cursor_active"),
+        ])),
     }
 
     # Thin orchestrator: glue + bare logical module tokens (no exec).

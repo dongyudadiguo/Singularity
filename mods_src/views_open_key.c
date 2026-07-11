@@ -1,0 +1,35 @@
+#include "views_common.h"
+/* payload: id[32]
+ * stack: key[32], f32 x, f32 y, i32 parent, f32 link_x, f32 link_y
+ * Opens or focuses key; starts drag on it. Pushes u32 index or 0xffffffff.
+ */
+__declspec(dllexport) void run(void){
+    H id; if (!payload_id(id, 0, 0)) { cont(); return; }
+    float ly = *(float*)pop(4), lx = *(float*)pop(4);
+    int parent = *(int*)pop(4);
+    float y = *(float*)pop(4), x = *(float*)pop(4);
+    u8 key[32]; memcpy(key, pop(32), 32);
+    u32 out = 0xffffffffu;
+    Table *tp = load_or_empty(id, 1);
+    if (!tp || zero_key(key)) { push(&out, 4); cont(); return; }
+    Table t = *tp;
+    int found = -1;
+    for (u32 i = 0; i < t.count; i++)
+        if (t.views[i].used && same_key(t.views[i].key, key)) { found = (int)i; break; }
+    if (found >= 0) {
+        t.active = (u32)found; t.dragging = found;
+        t.views[found].x = x; t.views[found].y = y;
+        out = (u32)found;
+    } else if (t.count < VIEW_MAX) {
+        u32 i = t.count++;
+        zero_view(&t.views[i]); t.views[i].used = 1;
+        memcpy(t.views[i].key, key, 32);
+        t.views[i].x = x; t.views[i].y = y;
+        t.views[i].parent = parent; t.views[i].linked = 1;
+        t.views[i].link_x = lx; t.views[i].link_y = ly;
+        t.active = i; t.dragging = (int)i; out = i;
+    }
+    store_table(id, &t);
+    push(&out, 4);
+    cont();
+}
