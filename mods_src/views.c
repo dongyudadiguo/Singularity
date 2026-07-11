@@ -9,9 +9,9 @@ extern __declspec(dllimport) void *pop(u32 size);
 extern __declspec(dllimport) void push(const void *p, u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
-extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);
-extern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 size);
-extern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);
+extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 id_len, u32 *size);
+extern __declspec(dllimport) void cvm_var_set(const u8 *id, u32 id_len, u32 size);
+extern __declspec(dllimport) void cvm_var_write(const u8 *id, u32 id_len, const u8 *data, u32 size);
 extern __declspec(dllimport) int cvm_resolve_payload_hash(const H k, H h);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
 extern __declspec(dllimport) u32 cvm_cached_len(void);
@@ -211,13 +211,33 @@ static void payload_summary(const u8 *instr, char *out, u32 outn) {
     else snprintf(out, outn, "[%u bytes]", pn);
 }
 
-/* Width of one rendered instruction row at world layout units. */
+/* Width of one rendered instruction row at world layout units.
+ * Must stay >= views_render layout: swatch + name + icon + summary.
+ */
 static float row_text_width(const u8 *instr) {
     const char *nm = token_name(instr);
-    float w = measure_str(NAME_SIZE, nm);
-    char sum[100];
-    payload_summary(instr, sum, sizeof(sum));
-    if (sum[0]) w += NAME_GAP + measure_str(SUM_SIZE, sum);
+    float icon = NAME_SIZE; /* matches dxgfx_icon_size roughly */
+    float w = 4.0f + 4.0f; /* swatch + pad */
+    /* var_*_payload specialized rows hide the name and show icon+id+size */
+    int is_var = 0;
+    if (nm) {
+        if (!strcmp(nm, "var_set_payload") || !strcmp(nm, "var_read_payload") ||
+            !strcmp(nm, "var_write_payload") || !strcmp(nm, "var_set") ||
+            !strcmp(nm, "var_read") || !strcmp(nm, "var_write"))
+            is_var = 1;
+    }
+    if (is_var) {
+        w += icon + 6.0f;
+        char sum[100];
+        payload_summary(instr, sum, sizeof(sum));
+        if (sum[0]) w += measure_str(SUM_SIZE, sum);
+        else w += 80.0f; /* id hex estimate */
+    } else {
+        w += measure_str(NAME_SIZE, nm) + 6.0f + icon;
+        char sum[100];
+        payload_summary(instr, sum, sizeof(sum));
+        if (sum[0]) w += NAME_GAP + measure_str(SUM_SIZE, sum);
+    }
     w += PAD_X;
     if (w < MIN_HIT_W) w = MIN_HIT_W;
     return w;
@@ -286,7 +306,7 @@ static float row_hit_width(const View *v, int row) {
 
 static u8 *blob(const H id, u32 *size_out) {
     u32 size = 0;
-    u8 *p = cvm_var_get(id, &size);
+    u8 *p = cvm_var_get(id, 32, &size);
     if (!p || size < (u32)sizeof(Table)) return 0;
     if (size_out) *size_out = size;
     return p;
@@ -297,7 +317,7 @@ static Table *load(const H id) {
 }
 
 static void store(const H id, Table *t) {
-    cvm_var_write(id, (const u8 *)t, (u32)sizeof(Table));
+    cvm_var_write(id, 32, (const u8 *)t, (u32)sizeof(Table));
 }
 
 __declspec(dllexport) void run(void) {
@@ -314,11 +334,11 @@ __declspec(dllexport) void run(void) {
     if (!tp) {
         if (op == 0 || op == 18) {
             /* create empty table then continue into op handler */
-            cvm_var_set(id, (u32)sizeof(Table));
+            cvm_var_set(id, 32, (u32)sizeof(Table));
             Table empty;
             memset(&empty, 0, sizeof(empty));
             empty.dragging = -1;
-            cvm_var_write(id, (const u8 *)&empty, (u32)sizeof(Table));
+            cvm_var_write(id, 32, (const u8 *)&empty, (u32)sizeof(Table));
             tp = load(id);
             if (!tp) { cont(); return; }
         } else {
@@ -341,7 +361,7 @@ __declspec(dllexport) void run(void) {
     if (op == 0) {
         /* init: create/resize and seed view0 */
         if (an < 40) { cont(); return; }
-        cvm_var_set(id, (u32)sizeof(Table));
+        cvm_var_set(id, 32, (u32)sizeof(Table));
         memset(&t, 0, sizeof(t));
         t.dragging = -1;
         t.count = 1;

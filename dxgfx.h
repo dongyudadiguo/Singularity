@@ -31,6 +31,11 @@ DXGFX_API int dxgfx_mouse_f(float out_xy[2]);
 DXGFX_API int dxgfx_mouse_wheel_f(float *out_notches);
 DXGFX_API int dxgfx_draw_rect(float x, float y, float w, float h, dx_u32 argb, float stroke, int fill);
 DXGFX_API int dxgfx_draw_line(float x1, float y1, float x2, float y2, dx_u32 argb, float stroke);
+/* Draw icon named by token (loads icons/<name>.svg if present; else geometric fallback).
+ * x,y are world top-left; size is world height/width of icon box. */
+DXGFX_API int dxgfx_draw_icon(float x, float y, float size, dx_u32 argb, const char *name);
+/* World-space measure of icon box (always square size). */
+DXGFX_API float dxgfx_icon_size(float text_size);
 
 #ifdef __cplusplus
 }

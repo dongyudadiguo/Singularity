@@ -6,6 +6,8 @@
 #include <dwrite.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <math.h>
 
 static HWND g_hwnd = 0;
 static ID2D1Factory *g_d2d = 0;
@@ -460,4 +462,263 @@ extern "C" DXGFX_API int dxgfx_draw_text_screen(int x, int y, dx_u32 argb, float
     }
     free(ws);
     return dxgfx_auto_end();
+}
+
+
+
+/* -------------------------------------------------------------------------- */
+/* Icon / simple SVG drawing                                                   */
+/* icons/<name>.svg is preferred; missing files use geometric glyph fallback.  */
+/* -------------------------------------------------------------------------- */
+
+#define DX_ICON_CACHE 64
+typedef struct {
+    char name[64];
+    char *svg;          /* raw svg text, owned */
+    int on;
+    int has_file;       /* 1 if file loaded (even empty means tried) */
+} IconSlot;
+static IconSlot g_icons[DX_ICON_CACHE];
+
+static float dx_icon_size_for(float text_size) {
+    float s = text_size * 0.95f;
+    if (s < 10.0f) s = 10.0f;
+    return s;
+}
+
+extern "C" DXGFX_API float dxgfx_icon_size(float text_size) {
+    return dx_icon_size_for(text_size);
+}
+
+static IconSlot *icon_slot(const char *name) {
+    if (!name || !name[0]) return 0;
+    unsigned h = 2166136261u;
+    for (const char *p = name; *p; p++) { h ^= (unsigned char)*p; h *= 16777619u; }
+    unsigned idx = h & (DX_ICON_CACHE - 1);
+    for (unsigned n = 0; n < DX_ICON_CACHE; n++) {
+        unsigned i = (idx + n) & (DX_ICON_CACHE - 1);
+        if (g_icons[i].on && strcmp(g_icons[i].name, name) == 0) return &g_icons[i];
+        if (!g_icons[i].on) {
+            memset(&g_icons[i], 0, sizeof(g_icons[i]));
+            strncpy(g_icons[i].name, name, sizeof(g_icons[i].name) - 1);
+            g_icons[i].on = 1;
+            /* try load icons/<name>.svg */
+            char path[160];
+            snprintf(path, sizeof(path), "icons/%s.svg", name);
+            FILE *f = fopen(path, "rb");
+            if (!f) {
+                snprintf(path, sizeof(path), "./icons/%s.svg", name);
+                f = fopen(path, "rb");
+            }
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long sz = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                if (sz > 0 && sz < (1 << 20)) {
+                    g_icons[i].svg = (char*)malloc((size_t)sz + 1);
+                    if (g_icons[i].svg) {
+                        fread(g_icons[i].svg, 1, (size_t)sz, f);
+                        g_icons[i].svg[sz] = 0;
+                        g_icons[i].has_file = 1;
+                    }
+                }
+                fclose(f);
+            }
+            return &g_icons[i];
+        }
+    }
+    return 0;
+}
+
+/* Very small path subset: M/m L/l H/h V/v Z/z and numbers. Absolute after M. */
+static int svg_parse_num(const char **pp, float *out) {
+    const char *p = *pp;
+    while (*p == ' ' || *p == ',' || *p == '\n' || *p == '\r' || *p == '\t') p++;
+    char *end = 0;
+    float v = strtof(p, &end);
+    if (end == p) return 0;
+    *out = v;
+    *pp = end;
+    return 1;
+}
+
+static void icon_draw_fallback(float x, float y, float size, dx_u32 argb, const char *name) {
+    /* simple geometric marks for common ops */
+    float pad = size * 0.18f;
+    float x0 = x + pad, y0 = y + pad, x1 = x + size - pad, y1 = y + size - pad;
+    float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+    float stroke = size * 0.08f;
+    if (stroke < 1.0f) stroke = 1.0f;
+    /* default: rounded rect outline */
+    dxgfx_draw_rect(x0, y0, x1 - x0, y1 - y0, argb, stroke, 0);
+    if (!name) return;
+    if (!strcmp(name, "add") || !strcmp(name, "f32_add")) {
+        dxgfx_draw_line(cx, y0, cx, y1, argb, stroke);
+        dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
+    } else if (!strcmp(name, "sub") || !strcmp(name, "f32_sub")) {
+        dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
+    } else if (!strcmp(name, "mul") || !strcmp(name, "f32_mul")) {
+        dxgfx_draw_line(x0, y0, x1, y1, argb, stroke);
+        dxgfx_draw_line(x1, y0, x0, y1, argb, stroke);
+    } else if (!strcmp(name, "div") || !strcmp(name, "f32_div")) {
+        dxgfx_draw_line(x0, y1, x1, y0, argb, stroke);
+        dxgfx_draw_rect(cx - stroke, y0 + pad * 0.5f, stroke * 2, stroke * 2, argb, 1, 1);
+        dxgfx_draw_rect(cx - stroke, y1 - pad * 0.5f - stroke * 2, stroke * 2, stroke * 2, argb, 1, 1);
+    } else if (!strncmp(name, "var_set", 7)) {
+        /* gear-ish: square + center */
+        dxgfx_draw_rect(cx - size * 0.12f, cy - size * 0.12f, size * 0.24f, size * 0.24f, argb, 1, 1);
+    } else if (!strncmp(name, "var_read", 8)) {
+        /* arrow out */
+        dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
+        dxgfx_draw_line(x1 - pad, cy - pad, x1, cy, argb, stroke);
+        dxgfx_draw_line(x1 - pad, cy + pad, x1, cy, argb, stroke);
+    } else if (!strncmp(name, "var_write", 9)) {
+        /* arrow in */
+        dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
+        dxgfx_draw_line(x0, cy, x0 + pad, cy - pad, argb, stroke);
+        dxgfx_draw_line(x0, cy, x0 + pad, cy + pad, argb, stroke);
+    } else if (!strcmp(name, "const_payload") || !strcmp(name, "f32_const")) {
+        dxgfx_draw_rect(cx - size * 0.15f, cy - size * 0.15f, size * 0.3f, size * 0.3f, argb, stroke, 0);
+    } else if (!strncmp(name, "key_", 4)) {
+        dxgfx_draw_rect(x0, cy - size * 0.1f, x1 - x0, size * 0.2f, argb, stroke, 0);
+    } else if (!strcmp(name, "cond_payload") || !strcmp(name, "cond")) {
+        /* diamond */
+        dxgfx_draw_line(cx, y0, x1, cy, argb, stroke);
+        dxgfx_draw_line(x1, cy, cx, y1, argb, stroke);
+        dxgfx_draw_line(cx, y1, x0, cy, argb, stroke);
+        dxgfx_draw_line(x0, cy, cx, y0, argb, stroke);
+    } else if (!strcmp(name, "exec") || !strcmp(name, "exec_payload") || !strcmp(name, "jump_payload")) {
+        /* play triangle approx via lines */
+        dxgfx_draw_line(x0 + pad * 0.5f, y0, x0 + pad * 0.5f, y1, argb, stroke);
+        dxgfx_draw_line(x0 + pad * 0.5f, y0, x1, cy, argb, stroke);
+        dxgfx_draw_line(x0 + pad * 0.5f, y1, x1, cy, argb, stroke);
+    }
+}
+
+static void icon_draw_svg_paths(const char *svg, float x, float y, float size, dx_u32 argb) {
+    /* Find viewBox="minx miny w h" else assume 0 0 24 24 */
+    float vb_x = 0, vb_y = 0, vb_w = 24, vb_h = 24;
+    const char *vb = strstr(svg, "viewBox");
+    if (vb) {
+        const char *q = strchr(vb, '"');
+        if (!q) q = strchr(vb, '\'');
+        if (q) {
+            q++;
+            svg_parse_num(&q, &vb_x);
+            svg_parse_num(&q, &vb_y);
+            svg_parse_num(&q, &vb_w);
+            svg_parse_num(&q, &vb_h);
+            if (vb_w < 1) vb_w = 24;
+            if (vb_h < 1) vb_h = 24;
+        }
+    }
+    float sx = size / vb_w;
+    float sy = size / vb_h;
+    const char *p = svg;
+    for (;;) {
+        const char *dtag = strstr(p, " d=\"");
+        const char *dtag2 = strstr(p, " d='");
+        const char *dtag3 = strstr(p, "d=\"");
+        const char *use = 0;
+        char endc = '"';
+        if (dtag && (!dtag2 || dtag < dtag2) && (!dtag3 || dtag <= dtag3)) { use = dtag + 4; endc = '"'; }
+        else if (dtag2 && (!dtag3 || dtag2 <= dtag3)) { use = dtag2 + 4; endc = '\''; }
+        else if (dtag3) { use = dtag3 + 3; endc = '"'; }
+        else break;
+        const char *dend = strchr(use, endc);
+        if (!dend) break;
+        /* parse path */
+        const char *q = use;
+        float cx = 0, cy = 0, sx0 = 0, sy0 = 0;
+        int have = 0;
+        char cmd = 'M';
+        while (q < dend) {
+            while (q < dend && (*q == ' ' || *q == ',' || *q == '\n' || *q == '\r' || *q == '\t')) q++;
+            if (q >= dend) break;
+            if ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z')) { cmd = *q++; continue; }
+            float n1 = 0, n2 = 0;
+            if (cmd == 'H' || cmd == 'h' || cmd == 'V' || cmd == 'v') {
+                if (!svg_parse_num(&q, &n1)) break;
+            } else if (cmd == 'Z' || cmd == 'z') {
+                if (have) {
+                    float x1 = x + (sx0 - vb_x) * sx, y1 = y + (sy0 - vb_y) * sy;
+                    float x2 = x + (cx - vb_x) * sx, y2 = y + (cy - vb_y) * sy;
+                    dxgfx_draw_line(x2, y2, x1, y1, argb, 1.5f);
+                }
+                continue;
+            } else {
+                if (!svg_parse_num(&q, &n1)) break;
+                if (!svg_parse_num(&q, &n2)) break;
+            }
+            float nx = cx, ny = cy;
+            switch (cmd) {
+            case 'M': nx = n1; ny = n2; cmd = 'L'; sx0 = nx; sy0 = ny; have = 0; break;
+            case 'm': nx = cx + n1; ny = cy + n2; cmd = 'l'; sx0 = nx; sy0 = ny; have = 0; break;
+            case 'L': nx = n1; ny = n2; break;
+            case 'l': nx = cx + n1; ny = cy + n2; break;
+            case 'H': nx = n1; ny = cy; break;
+            case 'h': nx = cx + n1; ny = cy; break;
+            case 'V': nx = cx; ny = n1; break;
+            case 'v': nx = cx; ny = cy + n1; break;
+            case 'C': {
+                /* cubic: n1,n2 already first ctrl; need 4 more numbers */
+                float x2, y2, x3, y3;
+                if (!svg_parse_num(&q, &x2) || !svg_parse_num(&q, &y2) || !svg_parse_num(&q, &x3) || !svg_parse_num(&q, &y3)) break;
+                /* approximate with polyline */
+                float p0x = cx, p0y = cy, p1x = n1, p1y = n2, p2x = x2, p2y = y2, p3x = x3, p3y = y3;
+                float px = p0x, py = p0y;
+                for (int i = 1; i <= 8; i++) {
+                    float t = i / 8.0f, u = 1.0f - t;
+                    float bx = u*u*u*p0x + 3*u*u*t*p1x + 3*u*t*t*p2x + t*t*t*p3x;
+                    float by = u*u*u*p0y + 3*u*u*t*p1y + 3*u*t*t*p2y + t*t*t*p3y;
+                    float ax = x + (px - vb_x) * sx, ay = y + (py - vb_y) * sy;
+                    float bx2 = x + (bx - vb_x) * sx, by2 = y + (by - vb_y) * sy;
+                    dxgfx_draw_line(ax, ay, bx2, by2, argb, 1.5f);
+                    px = bx; py = by;
+                }
+                cx = p3x; cy = p3y; have = 1;
+                continue;
+            }
+            case 'c': {
+                float x2, y2, x3, y3;
+                if (!svg_parse_num(&q, &x2) || !svg_parse_num(&q, &y2) || !svg_parse_num(&q, &x3) || !svg_parse_num(&q, &y3)) break;
+                float p0x = cx, p0y = cy, p1x = cx + n1, p1y = cy + n2, p2x = cx + x2, p2y = cy + y2, p3x = cx + x3, p3y = cy + y3;
+                float px = p0x, py = p0y;
+                for (int i = 1; i <= 8; i++) {
+                    float t = i / 8.0f, u = 1.0f - t;
+                    float bx = u*u*u*p0x + 3*u*u*t*p1x + 3*u*t*t*p2x + t*t*t*p3x;
+                    float by = u*u*u*p0y + 3*u*u*t*p1y + 3*u*t*t*p2y + t*t*t*p3y;
+                    float ax = x + (px - vb_x) * sx, ay = y + (py - vb_y) * sy;
+                    float bx2 = x + (bx - vb_x) * sx, by2 = y + (by - vb_y) * sy;
+                    dxgfx_draw_line(ax, ay, bx2, by2, argb, 1.5f);
+                    px = bx; py = by;
+                }
+                cx = p3x; cy = p3y; have = 1;
+                continue;
+            }
+            default:
+                /* skip unknown by consuming nothing more */
+                break;
+            }
+            if (have) {
+                float ax = x + (cx - vb_x) * sx, ay = y + (cy - vb_y) * sy;
+                float bx = x + (nx - vb_x) * sx, by = y + (ny - vb_y) * sy;
+                dxgfx_draw_line(ax, ay, bx, by, argb, 1.5f);
+            }
+            cx = nx; cy = ny; have = 1;
+        }
+        p = dend + 1;
+    }
+}
+
+extern "C" DXGFX_API int dxgfx_draw_icon(float x, float y, float size, dx_u32 argb, const char *name) {
+    if (!name || size <= 0.0f) return 0;
+    if (!dxgfx_init()) return 0;
+    IconSlot *slot = icon_slot(name);
+    if (slot && slot->has_file && slot->svg && slot->svg[0]) {
+        icon_draw_svg_paths(slot->svg, x, y, size, argb);
+        return 1;
+    }
+    icon_draw_fallback(x, y, size, argb, name);
+    return 1;
 }

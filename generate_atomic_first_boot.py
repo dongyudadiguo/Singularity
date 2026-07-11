@@ -43,7 +43,6 @@ PART_TYPEIN = part_key("typein")
 PART_MATCH = part_key("match")
 PART_NAV = part_key("nav")
 PART_EDITKEYS = part_key("editkeys")
-PART_SAVEKEY = part_key("savekey")
 PART_CLICK_ON = part_key("click_on")
 PART_RMB_ON = part_key("rmb_on")
 PART_PAN_ON = part_key("pan_on")
@@ -56,7 +55,7 @@ PART_ZOOM_Y = part_key("zoom_y")
 PART_DRAG_XY = part_key("drag_xy")
 PART_RMB_OPEN = part_key("rmb_open")
 
-ACTION_CORE = ("down", "up", "delete", "insert", "backspace", "clear", "save")
+ACTION_CORE = ("down", "up", "delete", "insert", "backspace", "clear", "apply_var_edit")
 ACTION_POINTER = (
     "pan", "click", "rmb", "drag", "end_drag",
     "begin_pan", "end_pan", "begin_drag_anchor",
@@ -116,7 +115,8 @@ def static_text(x, y, color, size, text):
 
 
 def alloc_var(t, var_id, size):
-    return (t["var_set_payload"], var_id + u32(size))
+    """id may be any binary blob; encode as id_len[u32] + id + size[u32]."""
+    return (t["var_set_payload"], u32(len(var_id)) + var_id + u32(size))
 
 
 def views_op(t, op, args=b""):
@@ -197,7 +197,11 @@ def build_editor_actions(t):
         ]),
         "backspace": make_block([(t["string_backspace_var"], INPUT_VAR)]),
         "clear": make_block([(t["string_clear_var"], INPUT_VAR)]),
-        "save": make_block(sel(t) + [(t["block_flush"], b"")]),
+        # Enter: apply typein as specialized edit of selected var_*_payload row
+        "apply_var_edit": make_block(sel(t) + cur(t) + [
+            (t["var_edit_apply"], INPUT_VAR),
+            (t["string_clear_var"], INPUT_VAR),
+        ]),
     }
 
 
@@ -308,7 +312,7 @@ def part_rmb_open(t):
 def part_status(t):
     return [
         (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
-            b"multi-view | modular token blocks | mouse-zoom | Ctrl+S")),
+            b"modular | cyan=DLL amber=override | var: icon+id+size | Enter edits var")),
     ]
 
 
@@ -351,13 +355,8 @@ def part_editkeys(t, action_keys):
         (t["key_pressed"], u32(0x09)), cond_action(t, action_keys["insert"]),
         (t["key_pressed"], u32(0x08)), cond_action(t, action_keys["backspace"]),
         (t["key_pressed"], u32(0x1b)), cond_action(t, action_keys["clear"]),
-    ]
-
-
-def part_savekey(t, action_keys):
-    return [
-        (t["key_down"], u32(0x11)), (t["key_pressed"], u32(ord("S"))), (t["and"], b""),
-        cond_action(t, action_keys["save"]),
+        # Enter applies typein to selected var_*_payload (id / size edit)
+        (t["key_pressed"], u32(0x0d)), cond_action(t, action_keys["apply_var_edit"]),
     ]
 
 
@@ -429,7 +428,6 @@ def mod_editor(t):
     return [
         bare(PART_NAV),
         bare(PART_EDITKEYS),
-        bare(PART_SAVEKEY),
     ]
 
 
@@ -561,9 +559,9 @@ def main():
         "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack",
         "drawtext_screen", "drawtext_var_xy_screen", "drawtext_xy_stack_screen",
         "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
-        "and", "key_down", "key_pressed", "cond_payload", "registry_find",
+        "key_pressed", "cond_payload", "registry_find",
         "registry_token_name", "text_input", "string_append_var", "string_backspace_var",
-        "string_clear_var", "block_insert_stack", "block_delete", "block_flush",
+        "string_clear_var", "block_insert_stack", "block_delete",
         "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down", "mouse_button_pressed",
         "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
         "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views", "views_render",
@@ -599,7 +597,6 @@ def main():
         "match": (PART_MATCH, make_block(part_match(t))),
         "nav": (PART_NAV, make_block(part_nav(t, action_keys))),
         "editkeys": (PART_EDITKEYS, make_block(part_editkeys(t, action_keys))),
-        "savekey": (PART_SAVEKEY, make_block(part_savekey(t, action_keys))),
         "click_on": (PART_CLICK_ON, make_block(part_click_on(t, action_keys))),
         "rmb_on": (PART_RMB_ON, make_block(part_rmb_on(t, action_keys))),
         "pan_on": (PART_PAN_ON, make_block(part_pan_on(t, action_keys))),

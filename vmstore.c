@@ -321,6 +321,62 @@ __declspec(dllexport) void cvm_cache_load(const H k, const H h) {
     primary_idx = target;
 }
 
+
+/* Query whether the current identity has a user override for token k.
+ * Returns 1 and writes the override hash into h when present; else 0.
+ * Cached (256 slots, including negatives) — editor color query is hot. */
+#define OV_CACHE 256
+typedef struct { H key; H val; int on; int hit; } OvSlot;
+static OvSlot ov_slots[OV_CACHE];
+
+static u32 ov_hash(const H k) {
+    return (u32)k[0] | ((u32)k[1] << 8) | ((u32)k[2] << 16) | ((u32)k[3] << 24);
+}
+
+__declspec(dllexport) int cvm_has_override(const H k, H h) {
+    u32 idx = ov_hash(k) & (OV_CACHE - 1);
+    for (u32 n = 0; n < OV_CACHE; n++) {
+        u32 i = (idx + n) & (OV_CACHE - 1);
+        if (ov_slots[i].on && same(ov_slots[i].key, k)) {
+            if (ov_slots[i].hit) {
+                if (h) memcpy(h, ov_slots[i].val, 32);
+                return 1;
+            }
+            return 0;
+        }
+        if (!ov_slots[i].on) {
+            H v;
+            int ok = uget(k, v);
+            memcpy(ov_slots[i].key, k, 32);
+            ov_slots[i].on = 1;
+            ov_slots[i].hit = ok ? 1 : 0;
+            if (ok) {
+                memcpy(ov_slots[i].val, v, 32);
+                if (h) memcpy(h, v, 32);
+                return 1;
+            }
+            return 0;
+        }
+    }
+    /* full: uncached */
+    {
+        H v;
+        if (!uget(k, v)) return 0;
+        if (h) memcpy(h, v, 32);
+        return 1;
+    }
+}
+
+__declspec(dllexport) void cvm_override_cache_invalidate(const H k) {
+    if (!k) {
+        for (int i = 0; i < OV_CACHE; i++) ov_slots[i].on = 0;
+        return;
+    }
+    for (int i = 0; i < OV_CACHE; i++) {
+        if (ov_slots[i].on && same(ov_slots[i].key, k)) ov_slots[i].on = 0;
+    }
+}
+
 __declspec(dllexport) int cvm_resolve_payload_hash(const H k, H h) {
     /* Hot path: every bare logical token / views row resolve hits this.
      * No printf on HIT — modular composition resolves dozens of blocks/frame. */

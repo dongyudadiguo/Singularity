@@ -8,8 +8,8 @@ extern __declspec(dllimport) void *pop(u32 size);
 extern __declspec(dllimport) void push(const void *p, u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
-extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 *size);
-extern __declspec(dllimport) void cvm_var_write(const u8 *id, const u8 *data, u32 size);
+extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 id_len, u32 *size);
+extern __declspec(dllimport) void cvm_var_write(const u8 *id, u32 id_len, const u8 *data, u32 size);
 extern __declspec(dllimport) int cvm_resolve_payload_hash(const H k, H h);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
 extern __declspec(dllimport) u32 cvm_cached_len(void);
@@ -66,7 +66,7 @@ __declspec(dllexport) void run(void) {
     u32 vi = *(u32*)pop(4);
     if (cvm_payload_size() < 32) { push(&out,4); cont(); return; }
     H id; memcpy(id, cvm_payload(), 32);
-    u32 size=0; u8 *raw=cvm_var_get(id,&size);
+    u32 size=0; u8 *raw=cvm_var_get(id, 32, &size);
     if(!raw || size < sizeof(Table)) { push(&out,4); cont(); return; }
     Table t; memcpy(&t, raw, sizeof(t));
     if (vi >= t.count || !t.views[vi].used) { push(&out,4); cont(); return; }
@@ -96,7 +96,7 @@ __declspec(dllexport) void run(void) {
     for (u32 i=0;i<t.count;i++){
         if (t.views[i].used && same_key(t.views[i].key,key)) {
             t.active=i; t.dragging=(int)i;
-            cvm_var_write(id,(u8*)&t,sizeof(t));
+            cvm_var_write(id, 32, (u8*)&t, sizeof(t));
             out=i; push(&out,4); cont(); return;
         }
     }
@@ -113,7 +113,7 @@ __declspec(dllexport) void run(void) {
         t.views[i].parent=(int)vi;
         t.active=i; t.dragging=(int)i;
         out=i;
-        cvm_var_write(id,(u8*)&t,sizeof(t));
+        cvm_var_write(id, 32, (u8*)&t, sizeof(t));
     }
     push(&out,4);
     cont();
