@@ -166,6 +166,7 @@ def mouse_edge(t, mask, prev_var):
     """Rising-edge of mouse_button_down without specialized mouse_button_pressed.
     Stack ends with u32 edge (1 if down&&!prev). Also writes prev=down.
     Sequence: down; dup; read prev; not; and; swap; write prev  -> edge
+    prev_var is a plaintext id blob; write must use id_len+id (not legacy 32).
     """
     return [
         (t["mouse_button_down"], u32(mask)),
@@ -174,7 +175,7 @@ def mouse_edge(t, mask, prev_var):
         (t["not"], b""),
         (t["and"], b""),
         (t["swap_u32"], b""),
-        (t["var_write_payload"], prev_var),
+        (t["var_write_payload"], u32(len(prev_var)) + prev_var),
     ]
 
 
