@@ -8,7 +8,8 @@ from pathlib import Path
 # alias action — place the composition (module/part/action recipe) instead.
 # Example: string_*_var is forbidden; use stack string_append/string_backspace
 # + var_read_payload/var_write_payload (clear = const zeros + var_write).
-# Mega views op-table is forbidden in first-boot; use split views_* natives.
+# Mega views op-table / views_render / registry_* forbidden in first-boot;
+# use split views_* + views_paint_* + name_* natives.
 
 ROOT = Path(__file__).resolve().parent
 PROGRAM_KEY = hashlib.sha256(b"#SingularityAtomicProgram").digest()
@@ -101,7 +102,7 @@ def load_tokens():
 
 
 def write_instruction_names(result):
-    """token -> friendly name for views_render + registry_find match."""
+    """token -> friendly name for paint + name_prefix_find match."""
     records = []
     for name, token in sorted(result.items(), key=lambda kv: kv[0]):
         encoded = name.encode("ascii")[:95]
@@ -230,7 +231,7 @@ def build_editor_actions(t):
     return {
         "delete": make_block(sel(t) + cur(t) + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
         "insert": make_block(sel(t) + cur(t) + [
-            (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
+            (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
             (t["block_insert_stack"], b""),
             # clear input: write 256 zero bytes
             (t["const_payload"], bytes(256)), (t["var_write_payload"], INPUT_VAR),
@@ -385,8 +386,8 @@ def part_match(t):
         (t["measure_text"], f32(17.0) + u32(256)),
         (t["f32_const"], f32(32.0)), (t["f32_add"], b""),
         (t["swap_u32"], b""),
-        (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
-        (t["registry_token_name"], b""),
+        (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
+        (t["name_lookup"], b""),
         (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xff73808c, 17.0, 96)),
     ]
 
@@ -578,10 +579,22 @@ def build_native_surfaces(t):
     ]
     views_surface = make_block([bare(facets[n][0]) for n in surface_order])
 
-    # views_render: specialized renderer — expose as its own surface with leaf.
+    # render_draw: compose paint primitives (no mega views_render DLL).
     render_leaf_key = part_key("views.render_draw")
-    render_leaf = make_block([(t["views_render"], VIEWS)])
-    render_surface = make_block([bare(render_leaf_key)])
+    render_leaf = make_block([
+        views_call(t, "views_paint_links"),
+        views_call(t, "views_paint_titles"),
+        views_call(t, "views_paint_rows"),
+    ])
+    # Optional surface listing the three paint natives as firstchildren.
+    paint_facets = {
+        "paint_links": (part_key("views.paint_links"), sample_views(t, "views_paint_links")),
+        "paint_titles": (part_key("views.paint_titles"), sample_views(t, "views_paint_titles")),
+        "paint_rows": (part_key("views.paint_rows"), sample_views(t, "views_paint_rows")),
+        "render_draw": (render_leaf_key, render_leaf),
+    }
+    paint_order = ["paint_links", "paint_titles", "paint_rows", "render_draw"]
+    paint_surface = make_block([bare(paint_facets[n][0]) for n in paint_order])
 
     # Surface anchor is views_ensure (seed) — not a mega op-table DLL.
     surfaces = {
@@ -591,11 +604,11 @@ def build_native_surfaces(t):
             "block": views_surface,
             "facets": {n: facets[n] for n in surface_order},
         },
-        "views_render": {
-            "native": "views_render",
-            "token": t["views_render"],
-            "block": render_surface,
-            "facets": {"render_draw": (render_leaf_key, render_leaf)},
+        "views_paint": {
+            "native": "views_paint_rows",
+            "token": t["views_paint_rows"],
+            "block": paint_surface,
+            "facets": paint_facets,
         },
     }
     return surfaces
@@ -607,12 +620,13 @@ def main():
         "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack",
         "drawtext_screen", "drawtext_xy_stack_screen",
         "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
-        "key_pressed", "cond_payload", "registry_find",
-        "registry_token_name", "text_input", "string_append", "string_backspace",
+        "key_pressed", "cond_payload", "name_prefix_find", "name_lookup",
+        "text_input", "string_append", "string_backspace",
         "block_insert_stack", "block_delete",
         "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down",
         "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
-        "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views_render",
+        "world_mouse", "drop_u32", "swap_u32", "dup_u32",
+        "views_paint_links", "views_paint_titles", "views_paint_rows",
         "views_ensure", "views_active_key", "views_active_cursor", "views_cursor_add",
         "views_cursor_dec", "views_pointer_lmb", "views_pointer_rmb", "views_drag_end",
         "views_get_drag_xy", "views_set_drag_xy", "views_open", "views_init", "views_count",

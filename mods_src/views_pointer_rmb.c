@@ -29,25 +29,12 @@ __declspec(dllexport) void run(void){
         if (row<0 || (u32)row>=row_count) continue;
         float width=row_hit_width(v,row);
         if (mx<v->x || mx>=v->x+width) continue;
-        H h; cvm_resolve_payload_hash(v->key, h);
-        u8 *b=cvm_cached_base(); u32 nlen=cvm_cached_len();
-        u32 o=0;
-        for (u32 r=0; r<(u32)row && o+36<=nlen; r++) {
-            if (zero_key(b+o)) { o=nlen; break; }
-            u32 pn=*(u32*)(b+o+32);
-            if (o+36+pn>nlen) { o=nlen; break; }
-            o += 36+pn;
-        }
-        u8 key[32]; memset(key,0,32);
-        if (o+32<=nlen && !zero_key(b+o)) memcpy(key,b+o,32);
+        u32 o = block_row_offset(v, (u32)row);
+        u8 *b = cvm_cached_base();
+        u32 nlen = cvm_cached_len();
+        u8 key[32];
+        instr_open_key(b, nlen, o, key);
         if (zero_key(key)) break;
-        if (o+36<=nlen) {
-            u32 pn=*(u32*)(b+o+32);
-            if (pn==32 && o+68<=nlen && is_hash_carrier(key)) {
-                u8 ph[32]; memcpy(ph,b+o+36,32);
-                if (!zero_key(ph)) memcpy(key,ph,32);
-            }
-        }
         int found=-1;
         for (u32 j=0;j<t.count;j++) if (t.views[j].used && same_key(t.views[j].key,key)) { found=(int)j; break; }
         if (found>=0) {

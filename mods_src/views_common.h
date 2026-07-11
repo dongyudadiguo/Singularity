@@ -248,4 +248,35 @@ static Table *load_or_empty(const H id, int create) {
     cvm_var_write(id, 32, (const u8 *)&empty, (u32)sizeof(Table));
     return load_table(id);
 }
+
+/* Resolve open target for instruction at offset o in cached block.
+ * If token is hash-carrier and payload is 32-byte non-zero, use payload. */
+static void instr_open_key(const u8 *b, u32 nlen, u32 o, u8 key_out[32]) {
+    memset(key_out, 0, 32);
+    if (o + 32 > nlen || zero_key(b + o)) return;
+    memcpy(key_out, b + o, 32);
+    if (o + 36 > nlen) return;
+    u32 pn = *(u32 *)(b + o + 32);
+    if (pn == 32 && o + 68 <= nlen && is_hash_carrier(key_out)) {
+        u8 ph[32];
+        memcpy(ph, b + o + 36, 32);
+        if (!zero_key(ph)) memcpy(key_out, ph, 32);
+    }
+}
+
+/* Walk instruction stream of view key to row offset; returns o or nlen on fail. */
+static u32 block_row_offset(const View *v, u32 row) {
+    H h;
+    cvm_resolve_payload_hash(v->key, h);
+    u8 *b = cvm_cached_base();
+    u32 nlen = cvm_cached_len();
+    u32 o = 0;
+    for (u32 r = 0; r < row && o + 36 <= nlen; r++) {
+        if (zero_key(b + o)) return nlen;
+        u32 pn = *(u32 *)(b + o + 32);
+        if (o + 36 + pn > nlen) return nlen;
+        o += 36 + pn;
+    }
+    return o;
+}
 #endif
