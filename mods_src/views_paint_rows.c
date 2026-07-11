@@ -1,7 +1,15 @@
 #include "views_common.h"
 #include <stdlib.h>
+extern __declspec(dllimport) int cvm_has_dll(H h);
+extern __declspec(dllimport) int cvm_cache_hit(const H k);
 
 #define COL_DEFAULT   0xffe8ecef
+#define COL_DLL       0xff5ec8e8   /* cyan: native DLL present */
+#define COL_OVERRIDE  0xffe0a050   /* amber: content in local block cache */
+#define COL_BOTH      0xffd080e0   /* magenta: DLL + cache */
+#define COL_SW_DLL    0xff3aa0c8
+#define COL_SW_OVR    0xffc88830
+#define COL_SW_BOTH   0xffb060c0
 #define COL_SUM       0xff7fb8d8
 #define COL_VAR_ID    0xffc8e0a0
 #define COL_VAR_SIZE  0xffe8c878
@@ -95,6 +103,19 @@ __declspec(dllexport) void run(void){
             const u8 *tok = b + o;
             const u8 *payload = b + o + 36;
             const char *nm = token_name(tok);
+            /* Local-only (no network): bit0=DLL, bit1=block-cache key hit.
+             * cvm_cache_hit mutates primary_idx — restore view stream after. */
+            int flags = 0;
+            H th; memcpy(th, tok, 32);
+            if (cvm_has_dll(th)) flags |= 1;
+            if (cvm_cache_hit(th)) flags |= 2;
+            /* restore this view's cached instruction block as primary */
+            { H vh; cvm_resolve_payload_hash(v->key, vh); b = cvm_cached_base(); n = cvm_cached_len(); }
+            u32 name_col = COL_DEFAULT;
+            u32 sw_col = COL_SW_NONE;
+            if (flags == 3) { name_col = COL_BOTH; sw_col = COL_SW_BOTH; }
+            else if (flags == 1) { name_col = COL_DLL; sw_col = COL_SW_DLL; }
+            else if (flags == 2) { name_col = COL_OVERRIDE; sw_col = COL_SW_OVR; }
             float icon_sz = dxgfx_icon_size(NAME_SIZE);
             float name_w = measure_str(NAME_SIZE, nm);
             char id_text[96], extra[64], sum[100];
@@ -115,17 +136,17 @@ __declspec(dllexport) void run(void){
             if (total_w < MIN_HIT_W) total_w = MIN_HIT_W;
             int selected = (vi == t->active && row == v->cursor);
             if (selected) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, total_w, 23.0f, 0xff34414d, 1.0f, 1);
-            dxgfx_draw_rect(v->x - 6.0f, ry + 2.0f, SWATCH_W, 14.0f, COL_SW_NONE, 1.0f, 1);
+            dxgfx_draw_rect(v->x - 6.0f, ry + 2.0f, SWATCH_W, 14.0f, sw_col, 1.0f, 1);
             float tx = v->x + SWATCH_W + 2.0f;
             if (is_var) {
                 float cx = tx;
-                if (has_icon) { dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, COL_DEFAULT, icon_name); cx += icon_sz + ICON_GAP; }
+                if (has_icon) { dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, name_col, icon_name); cx += icon_sz + ICON_GAP; }
                 if (id_text[0]) { dxgfx_draw_text((int)cx, (int)ry, COL_VAR_ID, SUM_SIZE, id_text, (u32)strlen(id_text)); cx += measure_str(SUM_SIZE, id_text) + NAME_GAP; }
                 if (extra[0]) dxgfx_draw_text((int)cx, (int)ry, COL_VAR_SIZE, SUM_SIZE, extra, (u32)strlen(extra));
             } else {
-                dxgfx_draw_text((int)tx, (int)ry, COL_DEFAULT, NAME_SIZE, nm, (u32)strlen(nm));
+                dxgfx_draw_text((int)tx, (int)ry, name_col, NAME_SIZE, nm, (u32)strlen(nm));
                 float cx = tx + name_w;
-                if (has_icon) { cx += ICON_GAP; dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, COL_DEFAULT, icon_name); cx += icon_sz; }
+                if (has_icon) { cx += ICON_GAP; dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, name_col, icon_name); cx += icon_sz; }
                 if (sum[0]) dxgfx_draw_text((int)(cx + NAME_GAP), (int)ry, COL_SUM, SUM_SIZE, sum, (u32)strlen(sum));
             }
             ry += 24.0f;
