@@ -401,7 +401,7 @@ __declspec(dllexport) void run(void) {
             float name_w = measure(NAME_SIZE, nm);
 
             char id_text[96]; char extra_text[64]; char sum[100];
-            const char *icon_name = nm; /* default: name.svg */
+            const char *icon_name = nm; /* prefer icons/<name>.svg when present */
             int is_var = 0;
             id_text[0] = extra_text[0] = sum[0] = 0;
 
@@ -416,6 +416,11 @@ __declspec(dllexport) void run(void) {
                 icon_name = nm;
             }
 
+            /* Only show icon when SVG exists or a known glyph is registered.
+             * Unknown names used to get a hollow rect placeholder — that is gone. */
+            int has_icon = icon_name && dxgfx_has_icon(icon_name);
+            float icon_w = has_icon ? (ICON_GAP + icon_sz) : 0.0f;
+
             float sum_w = 0.0f;
             if (is_var) {
                 if (id_text[0]) sum_w += measure(SUM_SIZE, id_text);
@@ -424,8 +429,14 @@ __declspec(dllexport) void run(void) {
                 sum_w = measure(SUM_SIZE, sum);
             }
 
-            float gap = (sum_w > 0.0f || is_var) ? NAME_GAP : 0.0f;
-            float total_w = SWATCH_W + 4.0f + name_w + ICON_GAP + icon_sz + gap + sum_w + PAD_X;
+            float gap = (sum_w > 0.0f) ? NAME_GAP : 0.0f;
+            float total_w;
+            if (is_var) {
+                /* icon (optional) + id + size; no token name text */
+                total_w = SWATCH_W + 4.0f + (has_icon ? icon_sz + ICON_GAP : 0.0f) + sum_w + PAD_X;
+            } else {
+                total_w = SWATCH_W + 4.0f + name_w + icon_w + gap + sum_w + PAD_X;
+            }
             if (total_w < MIN_HIT_W) total_w = MIN_HIT_W;
 
             int selected = (vi == t->active && row == v->cursor);
@@ -435,10 +446,12 @@ __declspec(dllexport) void run(void) {
             dxgfx_draw_rect(v->x - 6.0f, ry + 2.0f, SWATCH_W, 14.0f, sw_col, 1.0f, 1);
 
             float tx = v->x + SWATCH_W + 2.0f;
-            /* specialized var: ICON first (no text token name), then id + size */
             if (is_var) {
-                dxgfx_draw_icon(tx, ry + 1.0f, icon_sz, name_col, icon_name);
-                float cx = tx + icon_sz + ICON_GAP;
+                float cx = tx;
+                if (has_icon) {
+                    dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, name_col, icon_name);
+                    cx += icon_sz + ICON_GAP;
+                }
                 if (id_text[0]) {
                     dxgfx_draw_text((int)cx, (int)ry, COL_VAR_ID, SUM_SIZE, id_text, (u32)strlen(id_text));
                     cx += measure(SUM_SIZE, id_text) + NAME_GAP;
@@ -448,10 +461,14 @@ __declspec(dllexport) void run(void) {
                 }
             } else {
                 dxgfx_draw_text((int)tx, (int)ry, name_col, NAME_SIZE, nm, (u32)strlen(nm));
-                float ix = tx + name_w + ICON_GAP;
-                dxgfx_draw_icon(ix, ry + 1.0f, icon_sz, name_col, icon_name);
+                float cx = tx + name_w;
+                if (has_icon) {
+                    cx += ICON_GAP;
+                    dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, name_col, icon_name);
+                    cx += icon_sz;
+                }
                 if (sum[0]) {
-                    int px = (int)(ix + icon_sz + NAME_GAP);
+                    int px = (int)(cx + NAME_GAP);
                     dxgfx_draw_text(px, (int)ry, COL_SUM, SUM_SIZE, sum, (u32)strlen(sum));
                 }
             }

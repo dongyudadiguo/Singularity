@@ -34,6 +34,8 @@ DXGFX_API int dxgfx_draw_line(float x1, float y1, float x2, float y2, dx_u32 arg
 /* Draw icon named by token (loads icons/<name>.svg if present; else geometric fallback).
  * x,y are world top-left; size is world height/width of icon box. */
 DXGFX_API int dxgfx_draw_icon(float x, float y, float size, dx_u32 argb, const char *name);
+/* 1 if icons/<name>.svg exists or a built-in glyph is registered; else 0. */
+DXGFX_API int dxgfx_has_icon(const char *name);
 /* World-space measure of icon box (always square size). */
 DXGFX_API float dxgfx_icon_size(float text_size);
 

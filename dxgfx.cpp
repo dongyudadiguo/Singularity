@@ -542,57 +542,82 @@ static int svg_parse_num(const char **pp, float *out) {
     return 1;
 }
 
-static void icon_draw_fallback(float x, float y, float size, dx_u32 argb, const char *name) {
-    /* simple geometric marks for common ops */
+/* Returns 1 if a meaningful glyph was drawn, 0 if name has no known mark.
+ * IMPORTANT: do NOT draw a default empty rectangle for unknown names — that
+ * made every token look like it had a hollow box to the right of the label.
+ */
+static int icon_draw_fallback(float x, float y, float size, dx_u32 argb, const char *name) {
+    if (!name || !name[0]) return 0;
     float pad = size * 0.18f;
     float x0 = x + pad, y0 = y + pad, x1 = x + size - pad, y1 = y + size - pad;
     float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
     float stroke = size * 0.08f;
     if (stroke < 1.0f) stroke = 1.0f;
-    /* default: rounded rect outline */
-    dxgfx_draw_rect(x0, y0, x1 - x0, y1 - y0, argb, stroke, 0);
-    if (!name) return;
     if (!strcmp(name, "add") || !strcmp(name, "f32_add")) {
         dxgfx_draw_line(cx, y0, cx, y1, argb, stroke);
         dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
-    } else if (!strcmp(name, "sub") || !strcmp(name, "f32_sub")) {
+        return 1;
+    }
+    if (!strcmp(name, "sub") || !strcmp(name, "f32_sub")) {
         dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
-    } else if (!strcmp(name, "mul") || !strcmp(name, "f32_mul")) {
+        return 1;
+    }
+    if (!strcmp(name, "mul") || !strcmp(name, "f32_mul")) {
         dxgfx_draw_line(x0, y0, x1, y1, argb, stroke);
         dxgfx_draw_line(x1, y0, x0, y1, argb, stroke);
-    } else if (!strcmp(name, "div") || !strcmp(name, "f32_div")) {
+        return 1;
+    }
+    if (!strcmp(name, "div") || !strcmp(name, "f32_div")) {
         dxgfx_draw_line(x0, y1, x1, y0, argb, stroke);
         dxgfx_draw_rect(cx - stroke, y0 + pad * 0.5f, stroke * 2, stroke * 2, argb, 1, 1);
         dxgfx_draw_rect(cx - stroke, y1 - pad * 0.5f - stroke * 2, stroke * 2, stroke * 2, argb, 1, 1);
-    } else if (!strncmp(name, "var_set", 7)) {
-        /* gear-ish: square + center */
+        return 1;
+    }
+    if (!strncmp(name, "var_set", 7)) {
+        dxgfx_draw_rect(x0, y0, x1 - x0, y1 - y0, argb, stroke, 0);
         dxgfx_draw_rect(cx - size * 0.12f, cy - size * 0.12f, size * 0.24f, size * 0.24f, argb, 1, 1);
-    } else if (!strncmp(name, "var_read", 8)) {
-        /* arrow out */
+        return 1;
+    }
+    if (!strncmp(name, "var_read", 8)) {
         dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
         dxgfx_draw_line(x1 - pad, cy - pad, x1, cy, argb, stroke);
         dxgfx_draw_line(x1 - pad, cy + pad, x1, cy, argb, stroke);
-    } else if (!strncmp(name, "var_write", 9)) {
-        /* arrow in */
+        return 1;
+    }
+    if (!strncmp(name, "var_write", 9)) {
         dxgfx_draw_line(x0, cy, x1, cy, argb, stroke);
         dxgfx_draw_line(x0, cy, x0 + pad, cy - pad, argb, stroke);
         dxgfx_draw_line(x0, cy, x0 + pad, cy + pad, argb, stroke);
-    } else if (!strcmp(name, "const_payload") || !strcmp(name, "f32_const")) {
-        dxgfx_draw_rect(cx - size * 0.15f, cy - size * 0.15f, size * 0.3f, size * 0.3f, argb, stroke, 0);
-    } else if (!strncmp(name, "key_", 4)) {
-        dxgfx_draw_rect(x0, cy - size * 0.1f, x1 - x0, size * 0.2f, argb, stroke, 0);
-    } else if (!strcmp(name, "cond_payload") || !strcmp(name, "cond")) {
-        /* diamond */
+        return 1;
+    }
+    if (!strcmp(name, "const_payload") || !strcmp(name, "f32_const")) {
+        dxgfx_draw_rect(cx - size * 0.18f, cy - size * 0.18f, size * 0.36f, size * 0.36f, argb, stroke, 0);
+        return 1;
+    }
+    if (!strncmp(name, "key_", 4)) {
+        dxgfx_draw_rect(x0, cy - size * 0.12f, x1 - x0, size * 0.24f, argb, stroke, 0);
+        return 1;
+    }
+    if (!strcmp(name, "cond_payload") || !strcmp(name, "cond")) {
         dxgfx_draw_line(cx, y0, x1, cy, argb, stroke);
         dxgfx_draw_line(x1, cy, cx, y1, argb, stroke);
         dxgfx_draw_line(cx, y1, x0, cy, argb, stroke);
         dxgfx_draw_line(x0, cy, cx, y0, argb, stroke);
-    } else if (!strcmp(name, "exec") || !strcmp(name, "exec_payload") || !strcmp(name, "jump_payload")) {
-        /* play triangle approx via lines */
+        return 1;
+    }
+    if (!strcmp(name, "exec") || !strcmp(name, "exec_payload") || !strcmp(name, "jump_payload")) {
         dxgfx_draw_line(x0 + pad * 0.5f, y0, x0 + pad * 0.5f, y1, argb, stroke);
         dxgfx_draw_line(x0 + pad * 0.5f, y0, x1, cy, argb, stroke);
         dxgfx_draw_line(x0 + pad * 0.5f, y1, x1, cy, argb, stroke);
+        return 1;
     }
+    if (!strcmp(name, "measure_text")) {
+        dxgfx_draw_line(x0, y1, x1, y1, argb, stroke);
+        dxgfx_draw_line(x0, y0, x0, y1, argb, stroke);
+        return 1;
+    }
+    /* unknown: draw nothing (no hollow box) */
+    return 0;
 }
 
 static void icon_draw_svg_paths(const char *svg, float x, float y, float size, dx_u32 argb) {
@@ -712,6 +737,7 @@ static void icon_draw_svg_paths(const char *svg, float x, float y, float size, d
 }
 
 extern "C" DXGFX_API int dxgfx_draw_icon(float x, float y, float size, dx_u32 argb, const char *name) {
+    /* Returns 1 if an SVG or known glyph was drawn; 0 if nothing (no placeholder box). */
     if (!name || size <= 0.0f) return 0;
     if (!dxgfx_init()) return 0;
     IconSlot *slot = icon_slot(name);
@@ -719,6 +745,24 @@ extern "C" DXGFX_API int dxgfx_draw_icon(float x, float y, float size, dx_u32 ar
         icon_draw_svg_paths(slot->svg, x, y, size, argb);
         return 1;
     }
-    icon_draw_fallback(x, y, size, argb, name);
-    return 1;
+    return icon_draw_fallback(x, y, size, argb, name);
+}
+
+/* Non-drawing probe: 1 if icons/<name>.svg exists or a built-in glyph is known. */
+extern "C" DXGFX_API int dxgfx_has_icon(const char *name) {
+    if (!name || !name[0]) return 0;
+    IconSlot *slot = icon_slot(name);
+    if (slot && slot->has_file && slot->svg && slot->svg[0]) return 1;
+    /* same names as icon_draw_fallback */
+    if (!strcmp(name, "add") || !strcmp(name, "f32_add")) return 1;
+    if (!strcmp(name, "sub") || !strcmp(name, "f32_sub")) return 1;
+    if (!strcmp(name, "mul") || !strcmp(name, "f32_mul")) return 1;
+    if (!strcmp(name, "div") || !strcmp(name, "f32_div")) return 1;
+    if (!strncmp(name, "var_set", 7) || !strncmp(name, "var_read", 8) || !strncmp(name, "var_write", 9)) return 1;
+    if (!strcmp(name, "const_payload") || !strcmp(name, "f32_const")) return 1;
+    if (!strncmp(name, "key_", 4)) return 1;
+    if (!strcmp(name, "cond_payload") || !strcmp(name, "cond")) return 1;
+    if (!strcmp(name, "exec") || !strcmp(name, "exec_payload") || !strcmp(name, "jump_payload")) return 1;
+    if (!strcmp(name, "measure_text")) return 1;
+    return 0;
 }
