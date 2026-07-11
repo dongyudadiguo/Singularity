@@ -153,6 +153,131 @@ def require_atomic_mods(manifest, blocks):
                 raise RuntimeError(f"integrated editor mod forbidden: {name}")
 
 
+
+# ---------------------------------------------------------------------------
+# Tag taxonomy: natives hang under #TAG/#atomic/#<class>/token
+# Server children order = score desc, then seq desc (re-vote refreshes seq).
+# Client path pick = DFS in that order; first hit is the preferred path.
+# ---------------------------------------------------------------------------
+
+def classify_native(name: str) -> str:
+    """Return leaf class tag text (with leading #)."""
+    if name.startswith("views_"):
+        return "#views"
+    if name.startswith("var_"):
+        return "#var"
+    if name.startswith("block_"):
+        return "#block"
+    if name.startswith("f32_") or name == "i32_to_f32":
+        return "#f32"
+    if name.startswith("i32_"):
+        return "#i32"
+    if name in {
+        "add", "sub", "mul", "div", "mod",
+        "and", "or", "not", "eq", "neq", "gt", "lt", "gte", "lte",
+    }:
+        return "#ops"
+    if name in {"drop_u32", "dup_u32", "swap_u32", "const_payload"}:
+        return "#stack"
+    if name in {
+        "cond_payload", "jump_payload", "reexec", "exec", "exec_payload",
+        "cond_reexec", "cond", "halt", "ret",
+    }:
+        return "#control"
+    if (
+        name.startswith("mouse")
+        or name.startswith("key_")
+        or name in {"text_input", "world_mouse", "screen_size", "input_snapshot"}
+    ):
+        return "#input"
+    if (
+        name.startswith("frame_")
+        or name.startswith("draw")
+        or name in {"measure_text", "camera_set", "camera_set_stack"}
+    ):
+        return "#gfx"
+    if name.startswith("string_"):
+        return "#string"
+    if name.startswith("name_"):
+        return "#name"
+    return "#misc"
+
+
+def install_tag_taxonomy(sock, identity, manifest):
+    """Publish classified tag graph and vote edges so taxonomy ranks first."""
+    tag = hashlib.sha256(b"#TAG").digest()
+
+    def tag_blob(text: str) -> bytes:
+        # Content-addressed tag node: hash == sha256(text bytes).
+        raw = text.encode("ascii")
+        h = upload(sock, raw)
+        if h != hashlib.sha256(raw).digest():
+            raise RuntimeError(f"tag upload hash mismatch for {text}")
+        return h
+
+    atomic = tag_blob("#atomic")
+    add_edge(sock, tag, atomic)
+    # Prefer #atomic over legacy flat tokens under #TAG.
+    vote(sock, identity, tag, atomic)
+
+    classes = {}
+    class_order = [
+        "#ops", "#stack", "#f32", "#i32", "#var", "#block", "#control",
+        "#input", "#gfx", "#string", "#name", "#views", "#misc",
+    ]
+    for text in class_order:
+        classes[text] = tag_blob(text)
+        add_edge(sock, atomic, classes[text])
+        vote(sock, identity, atomic, classes[text])
+
+    # Group natives by class (stable alpha within class for reproducible seq).
+    buckets = {c: [] for c in class_order}
+    for name in sorted(manifest["native"].keys()):
+        buckets[classify_native(name)].append(name)
+
+    for class_text in class_order:
+        class_key = classes[class_text]
+        for name in buckets[class_text]:
+            token = bytes.fromhex(manifest["native"][name])
+            dll = (ROOT / "mods" / f"{token.hex()}.dll").read_bytes()
+            if upload(sock, dll) != token:
+                raise RuntimeError(f"uploaded token mismatch for {name}")
+            name_hash = upload(sock, name.encode("ascii"))
+            # Classified edge (preferred path once voted).
+            add_edge(sock, class_key, token)
+            vote(sock, identity, class_key, token)
+            # Human-readable name child on the token.
+            add_edge(sock, token, name_hash)
+            # Keep a soft link under #atomic for discoverability without
+            # outranking class edges (no vote on this flat atomic edge).
+            add_edge(sock, atomic, token)
+
+    # Actions / modules as logical tokens under their own classes (optional graph).
+    act_tag = tag_blob("#actions")
+    add_edge(sock, atomic, act_tag)
+    vote(sock, identity, atomic, act_tag)
+    for name, meta in sorted(manifest.get("actions", {}).items()):
+        key = bytes.fromhex(meta["key"])
+        # action key is logical; content is the action block hash already edged.
+        name_hash = upload(sock, name.encode("ascii"))
+        add_edge(sock, act_tag, key)
+        vote(sock, identity, act_tag, key)
+        add_edge(sock, key, name_hash)
+
+    mod_tag = tag_blob("#modules")
+    add_edge(sock, atomic, mod_tag)
+    vote(sock, identity, atomic, mod_tag)
+    for name, meta in sorted(manifest.get("modules", {}).items()):
+        key = bytes.fromhex(meta["key"])
+        name_hash = upload(sock, name.encode("ascii"))
+        add_edge(sock, mod_tag, key)
+        vote(sock, identity, mod_tag, key)
+        add_edge(sock, key, name_hash)
+
+    return tag, atomic, classes
+
+
+
 def main():
     identity = load_verified_identity()
     manifest = load_manifest()
@@ -257,23 +382,20 @@ def main():
         add_edge(sock, bootstrap_token, first_hash)
         vote(sock, identity, bootstrap_token, first_hash)
 
-        tag = hashlib.sha256(b"#TAG").digest()
-        atomic_tag = upload(sock, b"#atomic")
-        add_edge(sock, tag, atomic_tag)
-        for name, value in manifest["native"].items():
-            token = bytes.fromhex(value)
-            dll = (ROOT / "mods" / f"{value}.dll").read_bytes()
-            if upload(sock, dll) != token:
-                raise RuntimeError(f"uploaded token mismatch for {name}")
-            name_hash = upload(sock, name.encode("ascii"))
-            add_edge(sock, atomic_tag, token)
-            add_edge(sock, token, name_hash)
+        # Classified tag graph + votes so preferred paths rank above legacy flat edges.
+        tag, atomic_tag, class_tags = install_tag_taxonomy(sock, identity, manifest)
 
     invalidate_children_cache(tag)
     invalidate_children_cache(atomic_tag)
+    for class_key in class_tags.values():
+        invalidate_children_cache(class_key)
     for value in manifest["native"].values():
         invalidate_children_cache(bytes.fromhex(value))
-    # Force next client completion walk to rebuild tag index.
+    for meta in manifest.get("actions", {}).values():
+        invalidate_children_cache(bytes.fromhex(meta["key"]))
+    for meta in manifest.get("modules", {}).values():
+        invalidate_children_cache(bytes.fromhex(meta["key"]))
+    # Force next client completion walk to rebuild tag index (priority DFS paths).
     (ROOT / "cache" / "tag_completion.bin").unlink(missing_ok=True)
     print("installed atomic first boot")
     print("bootstrap token:", bootstrap_token.hex())
