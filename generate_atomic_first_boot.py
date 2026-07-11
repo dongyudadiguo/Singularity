@@ -11,6 +11,8 @@ from pathlib import Path
 # Forbidden specialized: mega views, views_render, registry_*, string_*_var,
 # mouse_button_pressed, views_pointer_*, views_cursor_*. Prefer apply/pick +
 # table field ops + paint_*; cond_payload/name_*/platform gfx are mid-low OK.
+# Pointer map: LMB title=drag view, LMB row=select; RMB title=close node,
+# RMB row=open linked view + drag-out.
 
 ROOT = Path(__file__).resolve().parent
 PROGRAM_KEY = hashlib.sha256(b"#SingularityAtomicProgram").digest()
@@ -82,7 +84,7 @@ PART_RMB_OPEN = part_key("rmb_open")
 ACTION_CORE = ("delete", "insert", "backspace", "clear")
 ACTION_POINTER = (
     "pan", "click", "rmb", "drag", "end_drag",
-    "begin_pan", "end_pan", "begin_drag_anchor",
+    "begin_pan", "end_pan", "begin_drag_anchor", "begin_title_drag",
     "zoom_apply",
 )
 
@@ -212,6 +214,15 @@ def build_begin_drag_anchor(t):
     ]
 
 
+def build_begin_title_drag(t, action_keys):
+    # Reset anchor flag then sample grab origin for the active dragging view.
+    return [
+        (t["const_payload"], u32(0)),
+        (t["var_write_payload"], u32(len(DRAG_ANCHORED)) + DRAG_ANCHORED),
+        bare(action_keys["begin_drag_anchor"]),
+    ]
+
+
 def build_end_drag(t):
     return [
         bare(PART_DRAG_END),
@@ -219,9 +230,18 @@ def build_end_drag(t):
     ]
 
 
-def build_click(t):
-    # compose: world_mouse + views.pointer_lmb facet + drop (no parallel views-op wrapper)
-    return [(t["world_mouse"], b""), bare(PART_POINTER_LMB), (t["drop_u32"], b"")]
+def build_click(t, action_keys):
+    # LMB edge: apply_lmb (title -> active+dragging; row -> select, no drag).
+    # If a title drag started (dragging>=0), reset anchor and begin_drag_anchor.
+    return [
+        (t["world_mouse"], b""),
+        bare(PART_POINTER_LMB),
+        (t["drop_u32"], b""),
+        views_call(t, "views_get_dragging"),
+        (t["const_payload"], i32(-1)),
+        (t["neq"], b""),
+        (t["cond_payload"], action_keys["begin_title_drag"]),
+    ]
 
 
 def sel(t):
@@ -436,9 +456,17 @@ def part_pan_on(t, action_keys):
 
 
 def part_drag_on(t, action_keys):
+    # Drag while LMB (title move) or RMB (row open drag-out) is held.
     return [
-        (t["mouse_button_down"], u32(2)), cond_action(t, action_keys["drag"]),
-        (t["mouse_button_down"], u32(2)), (t["not"], b""), cond_action(t, action_keys["end_drag"]),
+        (t["mouse_button_down"], u32(1)),
+        (t["mouse_button_down"], u32(2)),
+        (t["or"], b""),
+        cond_action(t, action_keys["drag"]),
+        (t["mouse_button_down"], u32(1)),
+        (t["mouse_button_down"], u32(2)),
+        (t["or"], b""),
+        (t["not"], b""),
+        cond_action(t, action_keys["end_drag"]),
     ]
 
 
@@ -508,10 +536,14 @@ def build_drag(t, action_keys):
 
 
 def build_rmb(t, action_keys):
+    # RMB edge: apply_rmb (title -> close node; row -> open linked + dragging).
+    # Only start drag anchor when a view is actually being dragged (row open).
     return [
         bare(PART_RMB_OPEN),
-        (t["const_payload"], u32(0)), (t["var_write_payload"], u32(len(DRAG_ANCHORED)) + DRAG_ANCHORED),
-        bare(action_keys["begin_drag_anchor"]),
+        views_call(t, "views_get_dragging"),
+        (t["const_payload"], i32(-1)),
+        (t["neq"], b""),
+        (t["cond_payload"], action_keys["begin_title_drag"]),
     ]
 
 
@@ -612,9 +644,9 @@ def main():
         "views_set_cursor_active", "views_drag_end",
         "views_get_drag_xy", "views_set_drag_xy",
         "views_apply_lmb", "views_apply_rmb", "views_pick", "views_open_key",
-        "views_select_row", "views_set_active_drag",
+        "views_select_row", "views_set_active_drag", "views_get_dragging",
         "block_resolve", "block_instr_count", "instr_open_at",
-        "block_select_stack", "block_offset_at_index", "measure_text", "not", "and",
+        "block_select_stack", "block_offset_at_index", "measure_text", "not", "and", "or", "neq",
         "screen_size",
     }
     missing = sorted(required - t.keys())
@@ -630,8 +662,9 @@ def main():
     actions["begin_pan"] = make_block(build_begin_pan(t))
     actions["end_pan"] = make_block(build_end_pan(t))
     actions["begin_drag_anchor"] = make_block(build_begin_drag_anchor(t))
+    actions["begin_title_drag"] = make_block(build_begin_title_drag(t, action_keys))
     actions["pan"] = make_block(build_pan(t, action_keys))
-    actions["click"] = make_block(build_click(t))
+    actions["click"] = make_block(build_click(t, action_keys))
     actions["rmb"] = make_block(build_rmb(t, action_keys))
     actions["drag"] = make_block(build_drag(t, action_keys))
     actions["end_drag"] = make_block(build_end_drag(t))

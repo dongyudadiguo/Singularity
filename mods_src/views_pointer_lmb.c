@@ -1,5 +1,7 @@
 #include "views_common.h"
-/* stack mx,my; args optional title_h,pad,row_h,row_count — text-width hit */
+/* stack mx,my; args optional title_h,pad,row_h,row_count
+ * title -> active + dragging; row -> select (no drag).
+ */
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
     if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
@@ -18,7 +20,7 @@ __declspec(dllexport) void run(void){
         View *v=&t.views[i]; if(!v->used) continue;
         float width=title_text_width((u32)i,v);
         if (mx>=v->x && mx<v->x+width && my>=v->y-title_h && my<v->y) {
-            t.active=(u32)i; handled=1; break;
+            t.active=(u32)i; t.dragging=i; handled=1; break;
         }
     }
     if (!handled) {
@@ -29,7 +31,7 @@ __declspec(dllexport) void run(void){
             if (row<0 || (u32)row>row_count) continue;
             float width=row_hit_width(v,row);
             if (mx<v->x || mx>=v->x+width) continue;
-            t.active=(u32)i; t.views[i].cursor=(u32)row; handled=1; break;
+            t.active=(u32)i; t.views[i].cursor=(u32)row; t.dragging=-1; handled=1; break;
         }
     }
     store_table(id, id_len, &t); push(&handled,4); cont();
