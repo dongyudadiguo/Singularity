@@ -84,9 +84,10 @@ __declspec(dllexport) void run(void){
     for (u32 vi = 0; vi < t->count; vi++) {
         View *v = &t->views[vi];
         if (!v->used) continue;
-        char title[80];
-        snprintf(title, sizeof(title), "[%u] %02x%02x%02x%02x",
-                 vi, v->key[0], v->key[1], v->key[2], v->key[3]);
+        char dname[80];
+        key_display_name(v->key, dname, sizeof(dname));
+        char title[120];
+        snprintf(title, sizeof(title), "[%u] %s", vi, dname);
         float title_w = measure_str(16.0f, title);
         if (vi == t->active) {
             float tw = title_w + 16.0f;

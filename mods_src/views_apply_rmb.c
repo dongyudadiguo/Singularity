@@ -63,8 +63,7 @@ __declspec(dllexport) void run(void){
         if (row<0 || (u32)row>=row_count) continue;
         float width=row_hit_width(v,row);
         if (mx<v->x || mx>=v->x+width) continue;
-        u32 o=block_row_offset(v,(u32)row);
-        u8 key[32]; instr_open_key(cvm_cached_base(), cvm_cached_len(), o, key);
+        u8 key[32]; view_row_open_key(v, (u32)row, key);
         if (zero_key(key)) break;
         int found=-1;
         for (u32 j=0;j<t.count;j++) if (t.views[j].used && same_key(t.views[j].key,key)) { found=(int)j; break; }

@@ -406,7 +406,7 @@ def part_typein(t):
 
 
 def part_match(t):
-    # match label x = measure(var_read input) + pad; no measure_text_var wrapper
+    # match label x = measure(input)+pad; show tag-graph path (name_lookup -> path[160])
     return [
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
@@ -417,7 +417,7 @@ def part_match(t):
         (t["swap_u32"], b""),
         (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
         (t["name_lookup"], b""),
-        (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xff73808c, 17.0, 96)),
+        (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xff73808c, 17.0, 160)),
     ]
 
 

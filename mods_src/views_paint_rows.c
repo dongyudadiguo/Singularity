@@ -92,6 +92,39 @@ __declspec(dllexport) void run(void){
     for (u32 vi = 0; vi < t->count; vi++) {
         View *v = &t->views[vi];
         if (!v->used) continue;
+        /* Tag / network explorer: list children instead of block instructions. */
+        if (key_is_tag(v->key)) {
+            u32 row = 0;
+            float ry = v->y;
+            u32 nch = tag_child_count(v->key);
+            for (u32 r = 0; r < nch && r < 256; r++) {
+                u8 child[32];
+                if (!tag_child_at(v->key, r, child)) break;
+                char nm[96];
+                key_display_name(child, nm, sizeof(nm));
+                int is_tag = key_is_tag(child);
+                float name_w = measure_str(NAME_SIZE, nm);
+                float mark_w = is_tag ? (NAME_GAP + measure_str(SUM_SIZE, "tag")) : 0.0f;
+                float total_w = 4.0f + name_w + mark_w + PAD_X;
+                if (total_w < MIN_HIT_W) total_w = MIN_HIT_W;
+                int selected = (vi == t->active && row == v->cursor);
+                if (selected) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, total_w, 23.0f, 0xff34414d, 1.0f, 1);
+                u32 col = is_tag ? 0xffe0a050 : 0xffe8ecef;
+                dxgfx_draw_text((int)v->x, (int)ry, col, NAME_SIZE, nm, (u32)strlen(nm));
+                if (is_tag) {
+                    float cx = v->x + name_w + NAME_GAP;
+                    dxgfx_draw_text((int)cx, (int)ry, 0xff7fb8d8, SUM_SIZE, "tag", 3);
+                }
+                ry += 24.0f;
+                row++;
+            }
+            float end_w = measure_str(16.0f, "<end>") + 14.0f;
+            if (end_w < 48.0f) end_w = 48.0f;
+            int end_sel = (vi == t->active && row == v->cursor);
+            if (end_sel) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, end_w, 23.0f, 0xff34414d, 1.0f, 1);
+            dxgfx_draw_text((int)v->x, (int)ry, COL_END, 16.0f, "<end>", 5);
+            continue;
+        }
         H h; cvm_resolve_payload_hash(v->key, h);
         u8 *b = cvm_cached_base();
         u32 n = cvm_cached_len();

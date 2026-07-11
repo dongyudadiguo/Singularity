@@ -273,6 +273,8 @@ def main():
     invalidate_children_cache(atomic_tag)
     for value in manifest["native"].values():
         invalidate_children_cache(bytes.fromhex(value))
+    # Force next client completion walk to rebuild tag index.
+    (ROOT / "cache" / "tag_completion.bin").unlink(missing_ok=True)
     print("installed atomic first boot")
     print("bootstrap token:", bootstrap_token.hex())
     print("first block:    ", first_hash.hex())

@@ -17,6 +17,8 @@ extern __declspec(dllimport) void cvm_var_write(const u8 *id, u32 id_len, const 
 extern __declspec(dllimport) int cvm_resolve_payload_hash(const H k, H h);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
 extern __declspec(dllimport) u32 cvm_cached_len(void);
+extern __declspec(dllimport) u32 cvm_children(const H parent, H *out, u32 cap);
+extern __declspec(dllimport) u32 cvm_file_read(const H h, u8 *out, u32 cap);
 #include "../dxgfx.h"
 
 #define VIEW_MAX 32
@@ -26,6 +28,7 @@ extern __declspec(dllimport) u32 cvm_cached_len(void);
 #define NAME_GAP 12.0f
 #define PAD_X 14.0f
 #define MIN_HIT_W 48.0f
+
 
 typedef struct {
     u8 key[32];
@@ -45,6 +48,14 @@ typedef struct {
     u32 pad;
     View views[VIEW_MAX];
 } Table;
+
+/* forward decls for tag helpers defined below */
+static void key_display_name(const u8 *key, char *out, u32 outn);
+static int key_is_tag(const u8 *key);
+static u32 tag_child_count(const u8 *parent);
+static u32 tag_child_at(const u8 *parent, u32 row, u8 child_out[32]);
+static float tag_row_hit_width(const u8 *child_key);
+static void view_row_open_key(const View *v, u32 row, u8 key_out[32]);
 
 typedef struct { H token; char name[96]; } Entry;
 static Entry g_entries[2048];
@@ -162,9 +173,10 @@ static float row_text_width(const u8 *instr) {
     return w;
 }
 static float title_text_width(u32 vi, const View *v) {
-    char title[80];
-    snprintf(title, sizeof(title), "[%u] %02x%02x%02x%02x",
-             vi, v->key[0], v->key[1], v->key[2], v->key[3]);
+    char dname[80];
+    key_display_name(v->key, dname, sizeof(dname));
+    char title[120];
+    snprintf(title, sizeof(title), "[%u] %s", vi, dname);
     float w = measure_str(TITLE_SIZE, title) + 16.0f;
     if (w < 72.0f) w = 72.0f;
     return w;
@@ -206,6 +218,15 @@ static u32 block_row_count(const View *v) {
 }
 static float row_hit_width(const View *v, int row) {
     if (row < 0) return MIN_HIT_W;
+    if (key_is_tag(v->key)) {
+        u8 child[32];
+        if (!tag_child_at(v->key, (u32)row, child)) {
+            float w = measure_str(16.0f, "<end>") + PAD_X;
+            if (w < MIN_HIT_W) w = MIN_HIT_W;
+            return w;
+        }
+        return tag_row_hit_width(child);
+    }
     const u8 *instr = row_instr(v, (u32)row, 0);
     if (!instr) {
         float w = measure_str(16.0f, "<end>") + PAD_X;
@@ -295,4 +316,213 @@ static u32 block_row_offset(const View *v, u32 row) {
     }
     return o;
 }
+
+/* ---- tag-graph view helpers (network token explorer) ----
+ * CRITICAL: paint/hit-test is every frame. NEVER call cvm_file_read here —
+ * it downloads entire blobs (40KB+ DLLs) on the main conn and freezes the UI
+ * (white screen). Only touch disk cache + cvm_children (_ch.bin).
+ */
+static void tag_root_key(u8 out[32]) {
+    static const u8 root[32] = {
+        0xac,0x79,0x84,0x37,0x38,0x60,0xa5,0x14,
+        0x10,0x56,0x1d,0x1c,0xbc,0x5e,0x1b,0x64,
+        0xa3,0x07,0x27,0x75,0xce,0xb8,0x75,0x66,
+        0xfc,0x23,0x1c,0xf4,0x18,0x0f,0xb9,0x89
+    };
+    memcpy(out, root, 32);
+}
+
+static int blob_is_tag(const u8 *p, u32 n) {
+    if (!n || n >= 96) return 0;
+    if (p[0] != '#') return 0;
+    for (u32 i = 0; i < n; i++) if (p[i] < 32 || p[i] > 126) return 0;
+    return 1;
+}
+
+static int blob_is_name(const u8 *p, u32 n) {
+    if (!n || n >= 96) return 0;
+    if (p[0] == '#') return 0;
+    for (u32 i = 0; i < n; i++) if (p[i] < 32 || p[i] > 126) return 0;
+    return 1;
+}
+
+static void cache_blob_path(const u8 *h, char *path, u32 pathn) {
+    snprintf(path, pathn,
+        "cache/%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x.bin",
+        h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],
+        h[8],h[9],h[10],h[11],h[12],h[13],h[14],h[15],
+        h[16],h[17],h[18],h[19],h[20],h[21],h[22],h[23],
+        h[24],h[25],h[26],h[27],h[28],h[29],h[30],h[31]);
+}
+
+/* Disk-only peek. Returns 0 if not cached locally (NO network). */
+static u32 disk_peek(const u8 *key, u8 *out, u32 cap, u32 *full_sz_out) {
+    char path[140];
+    cache_blob_path(key, path, sizeof(path));
+    FILE *f = fopen(path, "rb");
+    if (!f) { if (full_sz_out) *full_sz_out = 0; return 0; }
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    long sz = ftell(f);
+    if (sz < 0) { fclose(f); return 0; }
+    if (full_sz_out) *full_sz_out = (u32)sz;
+    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return 0; }
+    u32 got = 0;
+    if (out && cap) got = (u32)fread(out, 1, cap, f);
+    fclose(f);
+    return got;
+}
+
+/* Tiny process-local memo so paint doesn't re-stat the same keys 100x/frame. */
+typedef struct {
+    u8 key[32];
+    char name[80];
+    u8 is_tag;   /* 0 unknown/no, 1 yes */
+    u8 on;
+} TagMemo;
+static TagMemo g_tag_memo[128];
+
+static TagMemo *tag_memo_get(const u8 *key) {
+    u32 h = (u32)key[0] | ((u32)key[1] << 8) | ((u32)key[2] << 16) | ((u32)key[3] << 24);
+    u32 idx = h & 127u;
+    for (u32 n = 0; n < 128; n++) {
+        u32 i = (idx + n) & 127u;
+        if (g_tag_memo[i].on && same_key(g_tag_memo[i].key, key)) return &g_tag_memo[i];
+        if (!g_tag_memo[i].on) {
+            memset(&g_tag_memo[i], 0, sizeof(g_tag_memo[i]));
+            memcpy(g_tag_memo[i].key, key, 32);
+            g_tag_memo[i].on = 1;
+            return &g_tag_memo[i];
+        }
+    }
+    return 0;
+}
+
+static int key_is_tag_root(const u8 *key) {
+    u8 root[32]; tag_root_key(root);
+    return same_key(key, root);
+}
+
+/* True if this key's content is a tag string (#...). Disk-only + root hardcode. */
+static int key_is_tag(const u8 *key) {
+    if (key_is_tag_root(key)) return 1;
+    TagMemo *m = tag_memo_get(key);
+    if (m && m->name[0]) return m->is_tag; /* already classified via display */
+    u8 buf[96]; u32 full = 0;
+    u32 n = disk_peek(key, buf, sizeof(buf), &full);
+    if (full >= 96) return 0;          /* large blob => not a tag string */
+    if (!n) return 0;                  /* uncached: do NOT network on paint */
+    return blob_is_tag(buf, n < full ? n : full);
+}
+
+/* Display title: disk cache / children name edge / hex. No network downloads. */
+static void key_display_name(const u8 *key, char *out, u32 outn) {
+    if (!outn) return;
+    out[0] = 0;
+    if (key_is_tag_root(key)) {
+        strncpy(out, "#TAG", outn - 1);
+        out[outn - 1] = 0;
+        TagMemo *m = tag_memo_get(key);
+        if (m) { strncpy(m->name, "#TAG", 79); m->is_tag = 1; }
+        return;
+    }
+    TagMemo *m = tag_memo_get(key);
+    if (m && m->name[0]) {
+        strncpy(out, m->name, outn - 1);
+        out[outn - 1] = 0;
+        return;
+    }
+
+    u8 buf[96]; u32 full = 0;
+    u32 n = disk_peek(key, buf, sizeof(buf), &full);
+    if (n && full < 96) {
+        if (blob_is_tag(buf, n)) {
+            u32 z = n < outn - 1 ? n : outn - 1;
+            memcpy(out, buf, z); out[z] = 0;
+            if (m) { strncpy(m->name, out, 79); m->is_tag = 1; }
+            return;
+        }
+        if (blob_is_name(buf, n)) {
+            u32 z = n < outn - 1 ? n : outn - 1;
+            memcpy(out, buf, z); out[z] = 0;
+            if (m) { strncpy(m->name, out, 79); m->is_tag = 0; }
+            return;
+        }
+    }
+
+    /* Prefer a small name child if that child is already on disk. */
+    {
+        H kids[32]; H k; memcpy(k, key, 32);
+        u32 kc = cvm_children(k, kids, 32);
+        if (kc > 32) kc = 32;
+        for (u32 i = 0; i < kc; i++) {
+            if (same_key(kids[i], key)) continue;
+            u8 nb[96]; u32 fsz = 0;
+            u32 nn = disk_peek(kids[i], nb, sizeof(nb), &fsz);
+            if (!nn || fsz >= 96) continue;
+            if (!blob_is_name(nb, nn)) continue;
+            u32 z = nn < outn - 1 ? nn : outn - 1;
+            memcpy(out, nb, z); out[z] = 0;
+            if (m) { strncpy(m->name, out, 79); m->is_tag = 0; }
+            return;
+        }
+    }
+
+    snprintf(out, outn, "%02x%02x%02x%02x", key[0], key[1], key[2], key[3]);
+    if (m) { strncpy(m->name, out, 79); m->is_tag = 0; }
+}
+
+/* Enumerate children of key as explorer rows (skip self-loops).
+ * cvm_children uses disk _ch.bin then one network fetch — OK once, cached. */
+static u32 tag_child_at(const u8 *parent, u32 row, u8 child_out[32]) {
+    H kids[256]; H p; memcpy(p, parent, 32);
+    u32 kc = cvm_children(p, kids, 256);
+    if (kc > 256) kc = 256;
+    u32 r = 0;
+    for (u32 i = 0; i < kc; i++) {
+        if (zero_key(kids[i]) || same_key(kids[i], parent)) continue;
+        if (r == row) {
+            memcpy(child_out, kids[i], 32);
+            return 1;
+        }
+        r++;
+    }
+    return 0;
+}
+
+static u32 tag_child_count(const u8 *parent) {
+    H kids[256]; H p; memcpy(p, parent, 32);
+    u32 kc = cvm_children(p, kids, 256);
+    if (kc > 256) kc = 256;
+    u32 r = 0;
+    for (u32 i = 0; i < kc; i++) {
+        if (zero_key(kids[i]) || same_key(kids[i], parent)) continue;
+        r++;
+        if (r > 256) break;
+    }
+    return r;
+}
+
+/* Open key for a row: block mode uses instr_open_key; tag mode uses child hash. */
+static void view_row_open_key(const View *v, u32 row, u8 key_out[32]) {
+    memset(key_out, 0, 32);
+    if (key_is_tag(v->key)) {
+        tag_child_at(v->key, row, key_out);
+        return;
+    }
+    u32 o = block_row_offset(v, row);
+    instr_open_key(cvm_cached_base(), cvm_cached_len(), o, key_out);
+}
+
+static float tag_row_hit_width(const u8 *child_key) {
+    char nm[96];
+    key_display_name(child_key, nm, sizeof(nm));
+    float w = measure_str(NAME_SIZE, nm) + PAD_X + 24.0f;
+    if (key_is_tag(child_key)) w += measure_str(SUM_SIZE, "tag") + NAME_GAP;
+    if (w < MIN_HIT_W) w = MIN_HIT_W;
+    return w;
+}
+
 #endif

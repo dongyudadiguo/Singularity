@@ -279,6 +279,14 @@ gcc -shared mods_src/views_open_at_row.c -o mods/views_open_at_row.dll libcont.a
 
 gcc -shared mods_src/measure_text_var.c -o mods/measure_text_var.dll libcont.a libvmstack.a libvmstate.a libvmvar.a libdxgfx.a
 
+
+REM name_* completion (tag-graph via cvm_children / cvm_file_read)
+gcc -shared mods_src/name_prefix_find.c -o mods/name_prefix_find.dll libcont.a libvmstack.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+gcc -shared mods_src/name_lookup.c -o mods/name_lookup.dll libcont.a libvmstack.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+gcc -shared mods_src/name_table_at.c -o mods/name_table_at.dll libcont.a libvmstack.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+gcc -shared mods_src/name_table_len.c -o mods/name_table_len.dll libcont.a libvmstack.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+gcc -shared mods_src/str_prefix_match.c -o mods/str_prefix_match.dll libcont.a libvmstack.a libvmstore.a libvm.a -lws2_32 -ladvapi32
+
 echo === Hash rename ===
 
 if exist mod_tokens.txt del mod_tokens.txt
