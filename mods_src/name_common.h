@@ -193,9 +193,10 @@ typedef struct {
     char path[160];
 } QItem;
 
-/* DFS in cvm_children order (= server score desc, seq desc).
- * First time a token is seen wins its path — so voted taxonomy edges that
- * sort ahead of legacy flat #TAG/token edges become the preferred path.
+/* Priority DFS (not BFS!) over cvm_children order (= server score desc, seq desc).
+ * First time a token is seen wins its path. With BFS, flat #TAG/neq is recorded
+ * before #atomic/#ops is expanded; DFS expands high-rank tag children fully first
+ * so #TAG/#atomic/#ops/neq wins over legacy #TAG/neq.
  */
 static void tag_graph_build(void) {
     static const H root = {
@@ -205,107 +206,122 @@ static void tag_graph_build(void) {
         0xfc,0x23,0x1c,0xf4,0x18,0x0f,0xb9,0x89
     };
 
-    QItem queue[512];
-    u32 qh = 0, qt = 0;
+    typedef struct {
+        H node;
+        char path[160];
+        H kids[256];
+        u32 kc;
+        u32 i;
+        int loaded;
+    } Frame;
+
+    Frame st[96];
+    u32 sp = 0;
     H seen[4096];
     u32 seen_n = 0;
 
-    memcpy(queue[qt].node, root, 32);
-    strncpy(queue[qt].path, "#TAG", 159);
-    qt++;
+    memset(&st[0], 0, sizeof(st[0]));
+    memcpy(st[0].node, root, 32);
+    strncpy(st[0].path, "#TAG", 159);
+    sp = 1;
     memcpy(seen[seen_n++], root, 32);
 
-    while (qh < qt && g_name_n < 4096 && seen_n < 4096) {
-        H node;
-        char parent_path[160];
-        memcpy(node, queue[qh].node, 32);
-        strncpy(parent_path, queue[qh].path, 159);
-        parent_path[159] = 0;
-        qh++;
+    while (sp > 0 && g_name_n < 4096 && seen_n < 4096) {
+        Frame *f = &st[sp - 1];
+        if (!f->loaded) {
+            f->kc = cvm_children(f->node, f->kids, 256);
+            if (f->kc > 256) f->kc = 256;
+            f->i = 0;
+            f->loaded = 1;
+        }
+        if (f->i >= f->kc) {
+            sp--;
+            continue;
+        }
 
-        H kids[256];
-        u32 kc = cvm_children(node, kids, 256);
-        if (kc > 256) kc = 256;
+        H kid;
+        memcpy(kid, f->kids[f->i], 32);
+        f->i++;
 
-        for (u32 i = 0; i < kc; i++) {
-            if (zero32(kids[i]) || same32(kids[i], node)) continue;
+        if (zero32(kid) || same32(kid, f->node)) continue;
 
-            int already = 0;
-            for (u32 s = 0; s < seen_n; s++) {
-                if (same32(seen[s], kids[i])) { already = 1; break; }
+        int already = 0;
+        for (u32 s = 0; s < seen_n; s++) {
+            if (same32(seen[s], kid)) { already = 1; break; }
+        }
+        if (already) continue;
+        if (seen_n < 4096) memcpy(seen[seen_n++], kid, 32);
+
+        char nm[96];
+        char full[160];
+        nm[0] = 0; full[0] = 0;
+
+        /* Known taxonomy tags — recurse immediately (DFS). */
+        if (known_tag_text(kid, nm, sizeof(nm))) {
+            path_join(f->path, nm, full, sizeof(full));
+            if (sp < 96) {
+                memset(&st[sp], 0, sizeof(st[sp]));
+                memcpy(st[sp].node, kid, 32);
+                strncpy(st[sp].path, full, 159);
+                st[sp].path[159] = 0;
+                sp++;
             }
-            if (already) continue;
-            if (seen_n < 4096) memcpy(seen[seen_n++], kids[i], 32);
+            continue;
+        }
 
-            char nm[96];
-            char full[160];
-            nm[0] = 0; full[0] = 0;
+        /* Disk-cached name child => token leaf */
+        if (name_from_children_disk(kid, nm, sizeof(nm))) {
+            path_join(f->path, nm, full, sizeof(full));
+            add_entry(kid, nm, full);
+            continue;
+        }
 
-            /* Known tag roots — recurse without I/O */
-            if (known_tag_text(kids[i], nm, sizeof(nm))) {
-                path_join(parent_path, nm, full, sizeof(full));
-                if (qt < 512) {
-                    memcpy(queue[qt].node, kids[i], 32);
-                    strncpy(queue[qt].path, full, 159);
-                    queue[qt].path[159] = 0;
-                    qt++;
+        u32 fullsz = 0;
+        u8 buf[96];
+        u32 got = disk_peek(kid, buf, sizeof(buf), &fullsz);
+
+        if (fullsz >= 96) {
+            hex4_name(kid, nm, sizeof(nm));
+            path_join(f->path, nm, full, sizeof(full));
+            add_entry(kid, nm, full);
+            continue;
+        }
+
+        if (got && fullsz > 0 && fullsz < 96) {
+            u32 use = got < fullsz ? got : fullsz;
+            if (is_tag_buf(buf, use)) {
+                if (use > 95) use = 95;
+                memcpy(nm, buf, use); nm[use] = 0;
+                path_join(f->path, nm, full, sizeof(full));
+                if (sp < 96) {
+                    memset(&st[sp], 0, sizeof(st[sp]));
+                    memcpy(st[sp].node, kid, 32);
+                    strncpy(st[sp].path, full, 159);
+                    st[sp].path[159] = 0;
+                    sp++;
                 }
-                continue;
-            }
-
-            /* Disk-cached name child => token candidate (no DLL download). */
-            if (name_from_children_disk(kids[i], nm, sizeof(nm))) {
-                path_join(parent_path, nm, full, sizeof(full));
-                add_entry(kids[i], nm, full);
-                continue;
-            }
-
-            u32 fullsz = 0;
-            u8 buf[96];
-            u32 got = disk_peek(kids[i], buf, sizeof(buf), &fullsz);
-
-            if (fullsz >= 96) {
-                hex4_name(kids[i], nm, sizeof(nm));
-                path_join(parent_path, nm, full, sizeof(full));
-                add_entry(kids[i], nm, full);
-                continue;
-            }
-
-            if (got && fullsz > 0 && fullsz < 96) {
-                u32 use = got < fullsz ? got : fullsz;
-                if (is_tag_buf(buf, use)) {
+            } else {
+                if (is_name_buf(buf, use)) {
                     if (use > 95) use = 95;
                     memcpy(nm, buf, use); nm[use] = 0;
-                    path_join(parent_path, nm, full, sizeof(full));
-                    if (qt < 512) {
-                        memcpy(queue[qt].node, kids[i], 32);
-                        strncpy(queue[qt].path, full, 159);
-                        queue[qt].path[159] = 0;
-                        qt++;
-                    }
                 } else {
-                    if (is_name_buf(buf, use)) {
-                        if (use > 95) use = 95;
-                        memcpy(nm, buf, use); nm[use] = 0;
-                    } else {
-                        hex4_name(kids[i], nm, sizeof(nm));
-                    }
-                    path_join(parent_path, nm, full, sizeof(full));
-                    add_entry(kids[i], nm, full);
+                    hex4_name(kid, nm, sizeof(nm));
                 }
-                continue;
+                path_join(f->path, nm, full, sizeof(full));
+                add_entry(kid, nm, full);
             }
-
-            /* Uncached opaque node: DO NOT network-fetch. Record hex token. */
-            hex4_name(kids[i], nm, sizeof(nm));
-            path_join(parent_path, nm, full, sizeof(full));
-            add_entry(kids[i], nm, full);
+            continue;
         }
+
+        /* Uncached opaque: hex leaf, no network download. */
+        hex4_name(kid, nm, sizeof(nm));
+        path_join(f->path, nm, full, sizeof(full));
+        add_entry(kid, nm, full);
     }
 }
 
 #define TAG_COMPLETION_CACHE "cache/tag_completion.bin"
-#define TAG_COMPLETION_MAGIC 0x32474154u /* TAG2 */
+#define TAG_COMPLETION_MAGIC 0x33474154u /* TAG3 priority-DFS */
 
 static int name_load_tag_cache(void) {
     FILE *f = fopen(TAG_COMPLETION_CACHE, "rb");
