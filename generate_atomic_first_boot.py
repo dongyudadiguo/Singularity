@@ -3,6 +3,10 @@ import json
 import struct
 from pathlib import Path
 
+# POLICY: mods must stay low-level. If a behavior is expressible as a bare
+# composition of existing tokens/facets, do NOT add a specialized native or
+# alias action — place the composition (module/part/action recipe) instead.
+
 ROOT = Path(__file__).resolve().parent
 PROGRAM_KEY = hashlib.sha256(b"#SingularityAtomicProgram").digest()
 INPUT_VAR = hashlib.sha256(b"atomic.editor.input").digest()
@@ -42,6 +46,17 @@ PART_STATUS = part_key("status")
 PART_TYPEIN = part_key("typein")
 PART_MATCH = part_key("match")
 PART_NAV = part_key("nav")
+PART_CURSOR_ADD = part_key("views.cursor_add")
+PART_CURSOR_DEC = part_key("views.cursor_dec")
+PART_POINTER_LMB = part_key("views.pointer_lmb")
+PART_POINTER_RMB = part_key("views.pointer_rmb")
+PART_DRAG_END = part_key("views.drag_end")
+PART_ENSURE = part_key("views.ensure")
+PART_RENDER_DRAW = part_key("views.render_draw")
+PART_GET_DRAG_XY = part_key("views.get_drag_xy")
+PART_SET_DRAG_XY = part_key("views.set_drag_xy")
+PART_ACTIVE_KEY = part_key("views.active_key")
+PART_ACTIVE_CURSOR = part_key("views.active_cursor")
 PART_EDITKEYS = part_key("editkeys")
 PART_CLICK_ON = part_key("click_on")
 PART_RMB_ON = part_key("rmb_on")
@@ -55,7 +70,7 @@ PART_ZOOM_Y = part_key("zoom_y")
 PART_DRAG_XY = part_key("drag_xy")
 PART_RMB_OPEN = part_key("rmb_open")
 
-ACTION_CORE = ("down", "up", "delete", "insert", "backspace", "clear", "apply_var_edit")
+ACTION_CORE = ("delete", "insert", "backspace", "clear")
 ACTION_POINTER = (
     "pan", "click", "rmb", "drag", "end_drag",
     "begin_pan", "end_pan", "begin_drag_anchor",
@@ -158,7 +173,7 @@ def build_begin_drag_anchor(t):
         (t["mouse_f"], b""),
         (t["var_write_payload"], GRAB_MY),
         (t["var_write_payload"], GRAB_MX),
-        views_op(t, 32),
+        bare(PART_GET_DRAG_XY),
         (t["var_write_payload"], GRAB_VY),
         (t["var_write_payload"], GRAB_VX),
         (t["const_payload"], u32(1)), (t["var_write_payload"], DRAG_ANCHORED),
@@ -167,28 +182,29 @@ def build_begin_drag_anchor(t):
 
 def build_end_drag(t):
     return [
-        views_op(t, 13),
+        bare(PART_DRAG_END),
         (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
     ]
 
 
 def build_click(t):
-    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
-    return [(t["world_mouse"], b""), views_op(t, 29, hit_args), (t["drop_u32"], b"")]
+    # compose: world_mouse + views.pointer_lmb facet + drop (no parallel views-op wrapper)
+    return [(t["world_mouse"], b""), bare(PART_POINTER_LMB), (t["drop_u32"], b"")]
 
 
 def sel(t):
-    return [views_op(t, 22), (t["block_select_stack"], b"")]
+    # active_key facet + block_select_stack (no raw views-op)
+    return [bare(PART_ACTIVE_KEY), (t["block_select_stack"], b"")]
 
 
 def cur(t):
-    return [views_op(t, 21), (t["block_offset_at_index"], b"")]
+    return [bare(PART_ACTIVE_CURSOR), (t["block_offset_at_index"], b"")]
 
 
 def build_editor_actions(t):
+    # Only actions that bind payload/state — pure aliases of existing facets
+    # (cursor_add/cursor_dec) are NOT re-wrapped as actions.
     return {
-        "down": make_block([views_op(t, 23, i32(1))]),
-        "up": make_block([views_op(t, 24)]),
         "delete": make_block(sel(t) + cur(t) + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
         "insert": make_block(sel(t) + cur(t) + [
             (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
@@ -197,11 +213,6 @@ def build_editor_actions(t):
         ]),
         "backspace": make_block([(t["string_backspace_var"], INPUT_VAR)]),
         "clear": make_block([(t["string_clear_var"], INPUT_VAR)]),
-        # Enter: apply typein as specialized edit of selected var_*_payload row
-        "apply_var_edit": make_block(sel(t) + cur(t) + [
-            (t["var_edit_apply"], INPUT_VAR),
-            (t["string_clear_var"], INPUT_VAR),
-        ]),
     }
 
 
@@ -243,7 +254,7 @@ def part_drag_xy(t):
         (t["var_read_payload"], GRAB_MY), (t["f32_sub"], b""),
         (t["var_read_payload"], CAM_Z), (t["f32_div"], b""),
         (t["f32_add"], b""),
-        views_op(t, 33),
+        bare(PART_SET_DRAG_XY),
     ]
 
 
@@ -301,10 +312,10 @@ def part_zoom_y(t):
 
 
 def part_rmb_open(t):
-    hit_args = f32(32.0) + f32(0.0) + f32(24.0) + u32(256)
+    # compose: world_mouse + views.pointer_rmb facet + drop
     return [
         (t["world_mouse"], b""),
-        views_op(t, 30, hit_args),
+        bare(PART_POINTER_RMB),
         (t["drop_u32"], b""),
     ]
 
@@ -312,27 +323,32 @@ def part_rmb_open(t):
 def part_status(t):
     return [
         (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
-            b"modular | cyan=DLL amber=override | var: icon+id+size | Enter edits var")),
+            b"modular | cyan=DLL amber=cache | compose>specialized | var icon+id+size")),
     ]
 
 
 def part_typein(t):
+    # typein = text_input + string_append_var + (var_read + drawtext_xy_stack_screen)
+    # no specialized drawtext_var_* wrapper
     return [
         (t["text_input"], b""), (t["string_append_var"], INPUT_VAR),
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
         (t["swap_u32"], b""), (t["drop_u32"], b""),
         (t["f32_const"], f32(20.0)), (t["swap_u32"], b""),
-        (t["drawtext_var_xy_screen"], INPUT_VAR + struct.pack("<If", 0xffffffff, 17.0)),
+        (t["var_read_payload"], INPUT_VAR),
+        (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xffffffff, 17.0, 256)),
     ]
 
 
 def part_match(t):
+    # match label x = measure(var_read input) + pad; no measure_text_var wrapper
     return [
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
         (t["swap_u32"], b""), (t["drop_u32"], b""),
-        (t["measure_text_var"], INPUT_VAR + f32(17.0)),
+        (t["var_read_payload"], INPUT_VAR),
+        (t["measure_text"], f32(17.0) + u32(256)),
         (t["f32_const"], f32(32.0)), (t["f32_add"], b""),
         (t["swap_u32"], b""),
         (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
@@ -342,9 +358,10 @@ def part_match(t):
 
 
 def part_nav(t, action_keys):
+    # Arrow keys exec existing views surface facets (no alias actions).
     return [
-        (t["key_pressed"], u32(0x28)), cond_action(t, action_keys["down"]),
-        (t["key_pressed"], u32(0x26)), cond_action(t, action_keys["up"]),
+        (t["key_pressed"], u32(0x28)), cond_action(t, PART_CURSOR_ADD),
+        (t["key_pressed"], u32(0x26)), cond_action(t, PART_CURSOR_DEC),
     ]
 
 
@@ -355,8 +372,6 @@ def part_editkeys(t, action_keys):
         (t["key_pressed"], u32(0x09)), cond_action(t, action_keys["insert"]),
         (t["key_pressed"], u32(0x08)), cond_action(t, action_keys["backspace"]),
         (t["key_pressed"], u32(0x1b)), cond_action(t, action_keys["clear"]),
-        # Enter applies typein to selected var_*_payload (id / size edit)
-        (t["key_pressed"], u32(0x0d)), cond_action(t, action_keys["apply_var_edit"]),
     ]
 
 
@@ -557,7 +572,7 @@ def main():
     t = load_tokens()
     required = {
         "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack",
-        "drawtext_screen", "drawtext_var_xy_screen", "drawtext_xy_stack_screen",
+        "drawtext_screen", "drawtext_xy_stack_screen",
         "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
         "key_pressed", "cond_payload", "registry_find",
         "registry_token_name", "text_input", "string_append_var", "string_backspace_var",
@@ -565,7 +580,7 @@ def main():
         "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down", "mouse_button_pressed",
         "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
         "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views", "views_render",
-        "block_select_stack", "block_offset_at_index", "measure_text_var", "not",
+        "block_select_stack", "block_offset_at_index", "measure_text", "not",
         "screen_size",
     }
     missing = sorted(required - t.keys())
@@ -618,14 +633,15 @@ def main():
 
     # Thin orchestrator: glue + bare logical module tokens (no exec).
     program = [
+        # Thin orchestrator: only frame glue + bare logical tokens (no specialized embeds).
         (t["frame_begin"], b""),
-        views_op(t, 18, PROGRAM_KEY + f32(40.0) + f32(70.0)),
+        bare(PART_ENSURE),          # views.ensure facet (not raw views-op soup)
         bare(MOD_CAMERA),
         (t["frame_clear"], u32(0xff11161b)),
         bare(MOD_INPUT),
         bare(MOD_ZOOM),
         bare(MOD_CAMERA),
-        (t["views_render"], VIEWS),
+        bare(PART_RENDER_DRAW),     # views.render_draw facet
         bare(MOD_HUD),
         bare(MOD_EDITOR),
         (t["frame_end"], b""),
