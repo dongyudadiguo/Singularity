@@ -6,6 +6,9 @@ from pathlib import Path
 # POLICY: mods must stay low-level. If a behavior is expressible as a bare
 # composition of existing tokens/facets, do NOT add a specialized native or
 # alias action — place the composition (module/part/action recipe) instead.
+# Example: string_*_var is forbidden; use stack string_append/string_backspace
+# + var_read_payload/var_write_payload (clear = const zeros + var_write).
+# Mega views op-table is forbidden in first-boot; use split views_* natives.
 
 ROOT = Path(__file__).resolve().parent
 PROGRAM_KEY = hashlib.sha256(b"#SingularityAtomicProgram").digest()
@@ -21,6 +24,8 @@ GRAB_VX = hashlib.sha256(b"atomic.cam.grab_vx").digest()
 GRAB_VY = hashlib.sha256(b"atomic.cam.grab_vy").digest()
 PAN_ACTIVE = hashlib.sha256(b"atomic.cam.pan_active").digest()
 DRAG_ANCHORED = hashlib.sha256(b"atomic.cam.drag_anchored").digest()
+PREV_LMB = hashlib.sha256(b"atomic.input.prev_lmb").digest()
+PREV_RMB = hashlib.sha256(b"atomic.input.prev_rmb").digest()
 VIEWS = hashlib.sha256(b"atomic.views.table").digest()
 
 
@@ -134,8 +139,9 @@ def alloc_var(t, var_id, size):
     return (t["var_set_payload"], u32(len(var_id)) + var_id + u32(size))
 
 
-def views_op(t, op, args=b""):
-    return (t["views"], VIEWS + u32(op) + args)
+def views_call(t, op_name, args=b""):
+    """Call a split views_* native. Payload is views_var_id[32] + op args (no op code)."""
+    return (t[op_name], VIEWS + args)
 
 
 def cond_action(t, key):
@@ -145,6 +151,22 @@ def cond_action(t, key):
 def bare(key):
     """Place a logical token in the stream (empty payload). Resolves to firstchild block."""
     return (key, b"")
+
+
+def mouse_edge(t, mask, prev_var):
+    """Rising-edge of mouse_button_down without specialized mouse_button_pressed.
+    Stack ends with u32 edge (1 if down&&!prev). Also writes prev=down.
+    Sequence: down; dup; read prev; not; and; swap; write prev  -> edge
+    """
+    return [
+        (t["mouse_button_down"], u32(mask)),
+        (t["dup_u32"], b""),
+        (t["var_read_payload"], prev_var),
+        (t["not"], b""),
+        (t["and"], b""),
+        (t["swap_u32"], b""),
+        (t["var_write_payload"], prev_var),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -204,15 +226,24 @@ def cur(t):
 def build_editor_actions(t):
     # Only actions that bind payload/state — pure aliases of existing facets
     # (cursor_add/cursor_dec) are NOT re-wrapped as actions.
+    # string edits: stack string ops + var_read/var_write (no string_*_var natives).
     return {
         "delete": make_block(sel(t) + cur(t) + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
         "insert": make_block(sel(t) + cur(t) + [
             (t["var_read_payload"], INPUT_VAR), (t["registry_find"], b""),
-            (t["block_insert_stack"], b""), (t["string_clear_var"], INPUT_VAR),
+            (t["block_insert_stack"], b""),
+            # clear input: write 256 zero bytes
+            (t["const_payload"], bytes(256)), (t["var_write_payload"], INPUT_VAR),
             (t["jump_payload"], PROGRAM_KEY),
         ]),
-        "backspace": make_block([(t["string_backspace_var"], INPUT_VAR)]),
-        "clear": make_block([(t["string_clear_var"], INPUT_VAR)]),
+        "backspace": make_block([
+            (t["var_read_payload"], INPUT_VAR),
+            (t["string_backspace"], u32(256)),
+            (t["var_write_payload"], INPUT_VAR),
+        ]),
+        "clear": make_block([
+            (t["const_payload"], bytes(256)), (t["var_write_payload"], INPUT_VAR),
+        ]),
     }
 
 
@@ -323,15 +354,18 @@ def part_rmb_open(t):
 def part_status(t):
     return [
         (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
-            b"modular | cyan=DLL amber=cache | compose>specialized | var icon+id+size")),
+            b"modular | compose>specialized | cond opens payload | edge=down+prev")),
     ]
 
 
 def part_typein(t):
-    # typein = text_input + string_append_var + (var_read + drawtext_xy_stack_screen)
-    # no specialized drawtext_var_* wrapper
+    # typein = text_input + (var_read + string_append + var_write) + draw
+    # no specialized string_append_var / drawtext_var_* wrappers
     return [
-        (t["text_input"], b""), (t["string_append_var"], INPUT_VAR),
+        (t["var_read_payload"], INPUT_VAR),
+        (t["text_input"], b""),
+        (t["string_append"], u32(256) + u32(256)),
+        (t["var_write_payload"], INPUT_VAR),
         (t["screen_size"], b""), (t["i32_to_f32"], b""),
         (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
         (t["swap_u32"], b""), (t["drop_u32"], b""),
@@ -376,15 +410,12 @@ def part_editkeys(t, action_keys):
 
 
 def part_click_on(t, action_keys):
-    return [
-        (t["mouse_button_pressed"], u32(1)), cond_action(t, action_keys["click"]),
-    ]
+    # edge = down && !prev; no specialized mouse_button_pressed native
+    return mouse_edge(t, 1, PREV_LMB) + [cond_action(t, action_keys["click"])]
 
 
 def part_rmb_on(t, action_keys):
-    return [
-        (t["mouse_button_pressed"], u32(2)), cond_action(t, action_keys["rmb"]),
-    ]
+    return mouse_edge(t, 2, PREV_RMB) + [cond_action(t, action_keys["rmb"])]
 
 
 def part_pan_on(t, action_keys):
@@ -489,9 +520,9 @@ def build_zoom_apply(t):
 # More integrated/specialized => more named facet tokens.
 # ---------------------------------------------------------------------------
 
-def sample_views(t, op, args=b""):
-    """One-instruction leaf showing a views op call pattern."""
-    return make_block([views_op(t, op, args)])
+def sample_views(t, op_name, args=b""):
+    """One-instruction leaf: split views_* native + views var id + args."""
+    return make_block([views_call(t, op_name, args)])
 
 
 def build_native_surfaces(t):
@@ -503,35 +534,36 @@ def build_native_surfaces(t):
     ensure_args = PROGRAM_KEY + f32(40.0) + f32(70.0)
 
     # Facet keys (logical). Display names are plain: ensure, pointer_rmb, ...
+    # Each facet is a dedicated native (no mega views op-table).
     facets = {
-        "ensure": (part_key("views.ensure"), sample_views(t, 18, ensure_args)),
-        "active_key": (part_key("views.active_key"), sample_views(t, 22)),
-        "active_cursor": (part_key("views.active_cursor"), sample_views(t, 21)),
-        "cursor_add": (part_key("views.cursor_add"), sample_views(t, 23, i32(1))),
-        "cursor_dec": (part_key("views.cursor_dec"), sample_views(t, 24)),
-        "pointer_lmb": (part_key("views.pointer_lmb"), sample_views(t, 29, hit_args)),
-        "pointer_rmb": (part_key("views.pointer_rmb"), sample_views(t, 30, hit_args)),
-        "drag_end": (part_key("views.drag_end"), sample_views(t, 13)),
-        "get_drag_xy": (part_key("views.get_drag_xy"), sample_views(t, 32)),
-        "set_drag_xy": (part_key("views.set_drag_xy"), sample_views(t, 33)),
+        "ensure": (part_key("views.ensure"), sample_views(t, "views_ensure", ensure_args)),
+        "active_key": (part_key("views.active_key"), sample_views(t, "views_active_key")),
+        "active_cursor": (part_key("views.active_cursor"), sample_views(t, "views_active_cursor")),
+        "cursor_add": (part_key("views.cursor_add"), sample_views(t, "views_cursor_add", i32(1))),
+        "cursor_dec": (part_key("views.cursor_dec"), sample_views(t, "views_cursor_dec")),
+        "pointer_lmb": (part_key("views.pointer_lmb"), sample_views(t, "views_pointer_lmb", hit_args)),
+        "pointer_rmb": (part_key("views.pointer_rmb"), sample_views(t, "views_pointer_rmb", hit_args)),
+        "drag_end": (part_key("views.drag_end"), sample_views(t, "views_drag_end")),
+        "get_drag_xy": (part_key("views.get_drag_xy"), sample_views(t, "views_get_drag_xy")),
+        "set_drag_xy": (part_key("views.set_drag_xy"), sample_views(t, "views_set_drag_xy")),
         "open": (part_key("views.open"), sample_views(
-            t, 14, PROGRAM_KEY + f32(120.0) + f32(90.0) + i32(-1) + f32(80.0) + f32(10.0))),
-        "init": (part_key("views.init"), sample_views(t, 0, PROGRAM_KEY + f32(40.0) + f32(70.0))),
-        "count": (part_key("views.count"), sample_views(t, 1)),
-        "active": (part_key("views.active"), sample_views(t, 2)),
-        "set_active": (part_key("views.set_active"), sample_views(t, 3, u32(0))),
-        "get_xy": (part_key("views.get_xy"), sample_views(t, 4, u32(0))),
-        "set_xy": (part_key("views.set_xy"), sample_views(t, 5, u32(0) + f32(0.0) + f32(0.0))),
-        "get_key": (part_key("views.get_key"), sample_views(t, 6, u32(0))),
-        "get_cursor": (part_key("views.get_cursor"), sample_views(t, 9, u32(0))),
-        "set_cursor": (part_key("views.set_cursor"), sample_views(t, 10, u32(0) + u32(0))),
-        "drag_begin": (part_key("views.drag_begin"), sample_views(t, 11, u32(0))),
-        "drag_step": (part_key("views.drag_step"), sample_views(t, 12, f32(0.0) + f32(0.0))),
-        "hit_title": (part_key("views.hit_title"), sample_views(t, 15, f32(32.0))),
-        "hit_row": (part_key("views.hit_row"), sample_views(t, 16, f32(24.0) + u32(256))),
-        "move_by": (part_key("views.move_by"), sample_views(t, 17, u32(0) + f32(0.0) + f32(0.0))),
-        "get_dragging": (part_key("views.get_dragging"), sample_views(t, 19)),
-        "set_cursor_active": (part_key("views.set_cursor_active"), sample_views(t, 20, u32(0))),
+            t, "views_open", PROGRAM_KEY + f32(120.0) + f32(90.0) + i32(-1) + f32(80.0) + f32(10.0))),
+        "init": (part_key("views.init"), sample_views(t, "views_init", PROGRAM_KEY + f32(40.0) + f32(70.0))),
+        "count": (part_key("views.count"), sample_views(t, "views_count")),
+        "active": (part_key("views.active"), sample_views(t, "views_active")),
+        "set_active": (part_key("views.set_active"), sample_views(t, "views_set_active", u32(0))),
+        "get_xy": (part_key("views.get_xy"), sample_views(t, "views_get_xy", u32(0))),
+        "set_xy": (part_key("views.set_xy"), sample_views(t, "views_set_xy", u32(0) + f32(0.0) + f32(0.0))),
+        "get_key": (part_key("views.get_key"), sample_views(t, "views_get_key", u32(0))),
+        "get_cursor": (part_key("views.get_cursor"), sample_views(t, "views_get_cursor", u32(0))),
+        "set_cursor": (part_key("views.set_cursor"), sample_views(t, "views_set_cursor", u32(0) + u32(0))),
+        "drag_begin": (part_key("views.drag_begin"), sample_views(t, "views_drag_begin", u32(0))),
+        "drag_step": (part_key("views.drag_step"), sample_views(t, "views_drag_step", f32(0.0) + f32(0.0))),
+        "hit_title": (part_key("views.hit_title"), sample_views(t, "views_hit_title", f32(32.0))),
+        "hit_row": (part_key("views.hit_row"), sample_views(t, "views_hit_row", f32(24.0) + u32(256))),
+        "move_by": (part_key("views.move_by"), sample_views(t, "views_move_by", u32(0) + f32(0.0) + f32(0.0))),
+        "get_dragging": (part_key("views.get_dragging"), sample_views(t, "views_get_dragging")),
+        "set_cursor_active": (part_key("views.set_cursor_active"), sample_views(t, "views_set_cursor_active", u32(0))),
     }
 
     # Surface body: only bare facet tokens (decomposable firstchild list).
@@ -551,10 +583,11 @@ def build_native_surfaces(t):
     render_leaf = make_block([(t["views_render"], VIEWS)])
     render_surface = make_block([bare(render_leaf_key)])
 
+    # Surface anchor is views_ensure (seed) — not a mega op-table DLL.
     surfaces = {
         "views": {
-            "native": "views",
-            "token": t["views"],
+            "native": "views_ensure",
+            "token": t["views_ensure"],
             "block": views_surface,
             "facets": {n: facets[n] for n in surface_order},
         },
@@ -575,12 +608,19 @@ def main():
         "drawtext_screen", "drawtext_xy_stack_screen",
         "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
         "key_pressed", "cond_payload", "registry_find",
-        "registry_token_name", "text_input", "string_append_var", "string_backspace_var",
-        "string_clear_var", "block_insert_stack", "block_delete",
-        "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down", "mouse_button_pressed",
+        "registry_token_name", "text_input", "string_append", "string_backspace",
+        "block_insert_stack", "block_delete",
+        "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down",
         "i32_to_f32", "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
-        "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views", "views_render",
-        "block_select_stack", "block_offset_at_index", "measure_text", "not",
+        "world_mouse", "drop_u32", "swap_u32", "dup_u32", "views_render",
+        "views_ensure", "views_active_key", "views_active_cursor", "views_cursor_add",
+        "views_cursor_dec", "views_pointer_lmb", "views_pointer_rmb", "views_drag_end",
+        "views_get_drag_xy", "views_set_drag_xy", "views_open", "views_init", "views_count",
+        "views_active", "views_set_active", "views_get_xy", "views_set_xy", "views_get_key",
+        "views_get_cursor", "views_set_cursor", "views_drag_begin", "views_drag_step",
+        "views_hit_title", "views_hit_row", "views_move_by", "views_get_dragging",
+        "views_set_cursor_active",
+        "block_select_stack", "block_offset_at_index", "measure_text", "not", "and",
         "screen_size",
     }
     missing = sorted(required - t.keys())
@@ -655,12 +695,15 @@ def main():
         alloc_var(t, GRAB_CX, 4), alloc_var(t, GRAB_CY, 4),
         alloc_var(t, GRAB_VX, 4), alloc_var(t, GRAB_VY, 4),
         alloc_var(t, PAN_ACTIVE, 4), alloc_var(t, DRAG_ANCHORED, 4),
+        alloc_var(t, PREV_LMB, 4), alloc_var(t, PREV_RMB, 4),
         alloc_var(t, VIEWS, 2320),
         (t["const_payload"], f32(640.0)), (t["var_write_payload"], CAM_X),
         (t["const_payload"], f32(360.0)), (t["var_write_payload"], CAM_Y),
         (t["const_payload"], f32(1.0)), (t["var_write_payload"], CAM_Z),
         (t["const_payload"], u32(0)), (t["var_write_payload"], PAN_ACTIVE),
         (t["const_payload"], u32(0)), (t["var_write_payload"], DRAG_ANCHORED),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], PREV_LMB),
+        (t["const_payload"], u32(0)), (t["var_write_payload"], PREV_RMB),
         (PROGRAM_KEY, b""),
     ])
     program_raw = make_block(program)

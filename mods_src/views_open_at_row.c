@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 typedef unsigned char u8;
 typedef unsigned u32;
@@ -36,19 +37,42 @@ typedef struct {
 static int zero32(const u8 *p){for(int i=0;i<32;i++)if(p[i])return 0;return 1;}
 static int same_key(const u8 *a,const u8 *b){for(int i=0;i<32;i++)if(a[i]!=b[i])return 0;return 1;}
 
-/* Tokens whose 32-byte payload is itself a content/logical hash to open.
- * Ordinary natives (views, var_*, etc.) may also have 32-byte payloads that
- * are NOT open targets — open the row token itself for those. */
-static int is_hash_carrier(const u8 *tok) {
-    static const u8 carriers[][32] = {
-        { 0x4b, 0xaf, 0xcc, 0xcf, 0xb9, 0xbe, 0xf8, 0x72, 0x46, 0x16, 0x28, 0xfe, 0x4b, 0x09, 0x2a, 0x2f, 0x43, 0xc4, 0xce, 0x9f, 0x73, 0xd9, 0x44, 0x7a, 0xaf, 0xb7, 0xef, 0xb6, 0x52, 0xcb, 0xf2, 0x2a },
-        { 0x65, 0x53, 0x23, 0xb4, 0x2c, 0xd6, 0x39, 0xa1, 0x7a, 0xfa, 0x8c, 0xca, 0xb9, 0xe2, 0xee, 0x6f, 0x1d, 0x3b, 0x77, 0x3c, 0x10, 0x9d, 0x1f, 0x35, 0xb7, 0x6c, 0xda, 0x95, 0x05, 0x46, 0x8a, 0x33 },
-        { 0x64, 0x6f, 0xf3, 0x0b, 0xb3, 0x59, 0x05, 0x95, 0x11, 0xad, 0x04, 0x2b, 0x62, 0x43, 0x0a, 0xb6, 0x68, 0x63, 0xea, 0x61, 0x04, 0x50, 0x17, 0xe2, 0x60, 0x4e, 0xa8, 0xdc, 0xbc, 0x14, 0xb7, 0x3d },
-        { 0x4f, 0xaa, 0xe5, 0x49, 0xd1, 0xea, 0xf9, 0x1d, 0x37, 0xab, 0x85, 0xdf, 0xc8, 0x8f, 0x9c, 0xe3, 0x6e, 0xc1, 0x25, 0x75, 0xb7, 0xed, 0xc5, 0xf1, 0x94, 0x33, 0xcb, 0x6b, 0x86, 0x37, 0xa7, 0xc4 },
-    };
-    for (u32 i = 0; i < (u32)(sizeof(carriers)/sizeof(carriers[0])); i++) {
-        if (same_key(tok, carriers[i])) return 1;
+/* Name-index lookup for hash-carrier tokens (payload is open target). */
+typedef struct { H token; char name[96]; } Entry;
+static Entry g_entries[2048];
+static u32 g_entry_count;
+static int g_index_loaded;
+static void load_index(void) {
+    if (g_index_loaded) return;
+    g_index_loaded = 1;
+    const char *paths[] = { "instruction_names.bin", ".\\instruction_names.bin", 0 };
+    for (int p = 0; paths[p]; p++) {
+        FILE *f = fopen(paths[p], "rb");
+        if (!f) continue;
+        fread(&g_entry_count, 4, 1, f);
+        if (g_entry_count > 2048) g_entry_count = 2048;
+        g_entry_count = (u32)fread(g_entries, sizeof(Entry), g_entry_count, f);
+        fclose(f);
+        return;
     }
+}
+static const char *token_name(const u8 *tok) {
+    static char hex[12];
+    if (zero32(tok)) return "<end>";
+    load_index();
+    for (u32 i = 0; i < g_entry_count; i++) {
+        if (same_key(g_entries[i].token, tok)) return g_entries[i].name;
+    }
+    snprintf(hex, sizeof(hex), "%02x%02x%02x%02x", tok[0], tok[1], tok[2], tok[3]);
+    return hex;
+}
+static int is_hash_carrier(const u8 *tok) {
+    const char *nm = token_name(tok);
+    if (!nm || !nm[0] || nm[0] == '<') return 0;
+    if (!strcmp(nm, "cond_payload")) return 1;
+    if (!strcmp(nm, "jump_payload")) return 1;
+    if (!strcmp(nm, "exec_payload")) return 1;
+    if (!strcmp(nm, "cond_reexec")) return 1;
     return 0;
 }
 

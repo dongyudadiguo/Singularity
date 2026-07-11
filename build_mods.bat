@@ -152,11 +152,16 @@ gcc -shared mods_src/block_payload_summary.c -o mods/block_payload_summary.dll l
 
 gcc -shared mods_src/text_input.c -o mods/text_input.dll libcont.a libvmstack.a libdxgfx.a
 
-gcc -shared mods_src/string_append_var.c -o mods/string_append_var.dll libcont.a libvmstack.a libvmstate.a libvmvar.a
+gcc -shared mods_src/string_append.c -o mods/string_append.dll libcont.a libvmstack.a libvmstate.a
 
-gcc -shared mods_src/string_backspace_var.c -o mods/string_backspace_var.dll libcont.a libvmstate.a libvmvar.a
+gcc -shared mods_src/string_backspace.c -o mods/string_backspace.dll libcont.a libvmstack.a libvmstate.a
 
-gcc -shared mods_src/string_clear_var.c -o mods/string_clear_var.dll libcont.a libvmstate.a libvmvar.a
+REM specialized string_*_var removed from first-boot; kept as optional disk leftovers if sources remain
+if exist mods_src\string_append_var.c gcc -shared mods_src/string_append_var.c -o mods/string_append_var.dll libcont.a libvmstack.a libvmstate.a libvmvar.a
+
+if exist mods_src\string_backspace_var.c gcc -shared mods_src/string_backspace_var.c -o mods/string_backspace_var.dll libcont.a libvmstate.a libvmvar.a
+
+if exist mods_src\string_clear_var.c gcc -shared mods_src/string_clear_var.c -o mods/string_clear_var.dll libcont.a libvmstate.a libvmvar.a
 
 gcc -shared mods_src/registry_find.c -o mods/registry_find.dll libcont.a libvmstack.a
 
@@ -212,6 +217,36 @@ gcc -shared mods_src/camera_set_stack.c -o mods/camera_set_stack.dll libcont.a l
 
 gcc -shared mods_src/i32_max.c -o mods/i32_max.dll libcont.a libvmstack.a
 
+
+
+REM split views_* natives (mega views op-table optional leftover)
+gcc -shared mods_src/views_ensure.c -o mods/views_ensure.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_init.c -o mods/views_init.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_count.c -o mods/views_count.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_active.c -o mods/views_active.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_set_active.c -o mods/views_set_active.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_get_xy.c -o mods/views_get_xy.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_set_xy.c -o mods/views_set_xy.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_get_key.c -o mods/views_get_key.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_get_cursor.c -o mods/views_get_cursor.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_set_cursor.c -o mods/views_set_cursor.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_drag_begin.c -o mods/views_drag_begin.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_drag_step.c -o mods/views_drag_step.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_drag_end.c -o mods/views_drag_end.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_open.c -o mods/views_open.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_hit_title.c -o mods/views_hit_title.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_hit_row.c -o mods/views_hit_row.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_move_by.c -o mods/views_move_by.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_get_dragging.c -o mods/views_get_dragging.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_set_cursor_active.c -o mods/views_set_cursor_active.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_active_cursor.c -o mods/views_active_cursor.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_active_key.c -o mods/views_active_key.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_cursor_add.c -o mods/views_cursor_add.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_cursor_dec.c -o mods/views_cursor_dec.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_pointer_lmb.c -o mods/views_pointer_lmb.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_pointer_rmb.c -o mods/views_pointer_rmb.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_get_drag_xy.c -o mods/views_get_drag_xy.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
+gcc -shared mods_src/views_set_drag_xy.c -o mods/views_set_drag_xy.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
 
 gcc -shared mods_src/views.c -o mods/views.dll libcont.a libvmstack.a libvmvar.a libvmstate.a libvmstore.a libvm.a libdxgfx.a -lws2_32 -ladvapi32
 
