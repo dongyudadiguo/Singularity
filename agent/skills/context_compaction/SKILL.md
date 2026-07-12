@@ -29,13 +29,15 @@ child exits. Default active compaction:
 1. Replaces all non-system messages with one summary user message.
 2. Stops the parent `ae.py` when `AE_RUNNER=1` so it does not auto-continue.
 
+Pass the summary **inline as a string**. Do **not** write or read
+`current_summary.md` (or any other summary sidecar file).
+
 Run from a Python tool:
 
 ```python
-from pathlib import Path
 from skills.context_compaction.compact import compact_active_file
 
-summary = Path("skills/context_compaction/current_summary.md").read_text(encoding="utf-8")
+summary = """...compacted engineering context..."""
 print(compact_active_file("input.json", summary))
 ```
 
@@ -49,23 +51,28 @@ user explicitly wants auto-continue after compaction.
 
 ## Offline Command
 
-When no `ae.py` process is using the file, compact all non-system history with:
+When no `ae.py` process is using the file, compact all non-system history with
+an inline summary:
 
 ```bat
-python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md
+python -m skills.context_compaction.compact input.json --summary "...compacted engineering context..."
 ```
 
 For an active run that should stop:
 
 ```bat
-python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md --active
+python -m skills.context_compaction.compact input.json --summary "...compacted engineering context..." --active
 ```
 
 Legacy keep-tools active compact:
 
 ```bat
-python -m skills.context_compaction.compact input.json --summary-file skills\context_compaction\current_summary.md --active-keep-tools
+python -m skills.context_compaction.compact input.json --summary "...compacted engineering context..." --active-keep-tools
 ```
+
+`--summary-file PATH` remains available only as an optional convenience when the
+summary already exists elsewhere. Prefer `--summary` / the Python string argument.
+Never create `skills/context_compaction/current_summary.md` as part of compaction.
 
 A positive `--keep-from-user N` retains the latest `N` user turns and all
 subsequent messages. `--keep-from-index INDEX` is for an exact, validated
@@ -78,11 +85,12 @@ offline boundary. Neither retention option may be combined with `--active` or
 2. Do not print or manually inspect the complete `input.json` merely to compact it.
 3. Preserve all leading `system` messages exactly.
 4. Replace archived messages with one `user` summary message.
-5. Default active compaction stops the runner; do not leave it free to make another model call.
-6. Reject orphaned retained tool results and invalid boundaries.
-7. Create a timestamped backup and write atomically.
-8. Report message and byte counts before and after compaction.
-9. Never include credentials, raw tool logs, repeated status messages, or obsolete implementation detail in the summary.
+5. Build the summary in memory / as a Python string; do not generate a summary markdown file.
+6. Default active compaction stops the runner; do not leave it free to make another model call.
+7. Reject orphaned retained tool results and invalid boundaries.
+8. Create a timestamped backup and write atomically.
+9. Report message and byte counts before and after compaction.
+10. Never include credentials, raw tool logs, repeated status messages, or obsolete implementation detail in the summary.
 
 ## Summary Contents
 

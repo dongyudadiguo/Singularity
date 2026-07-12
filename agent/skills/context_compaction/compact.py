@@ -190,10 +190,27 @@ def compact_active_file_keep_tools(input_path, summary):
     return compact_file(path, summary, keep_from_index=boundary)
 
 
+def _load_summary(args, parser):
+    has_text = args.summary is not None
+    has_file = args.summary_file is not None
+    if has_text == has_file:
+        parser.error("provide exactly one of --summary or --summary-file")
+    if has_text:
+        return args.summary
+    return Path(args.summary_file).read_text(encoding="utf-8")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Compact ae.py message context")
     parser.add_argument("input_json")
-    parser.add_argument("--summary-file", required=True)
+    parser.add_argument(
+        "--summary",
+        help="inline summary text (preferred; do not write a current_summary.md file)",
+    )
+    parser.add_argument(
+        "--summary-file",
+        help="optional path to an existing summary file; prefer --summary instead",
+    )
     parser.add_argument(
         "--active",
         action="store_true",
@@ -208,7 +225,7 @@ def main(argv=None):
     group.add_argument("--keep-from-index", type=int)
     group.add_argument("--keep-from-user", type=int, default=0)
     args = parser.parse_args(argv)
-    summary = Path(args.summary_file).read_text(encoding="utf-8")
+    summary = _load_summary(args, parser)
     if args.active and args.active_keep_tools:
         parser.error("--active cannot be combined with --active-keep-tools")
     if args.active:
