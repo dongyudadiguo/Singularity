@@ -56,6 +56,8 @@ static u32 tag_child_count(const u8 *parent);
 static u32 tag_child_at(const u8 *parent, u32 row, u8 child_out[32]);
 static float tag_row_hit_width(const u8 *child_key);
 static void view_row_open_key(const View *v, u32 row, u8 key_out[32]);
+static float title_text_width(u32 vi, const View *v);
+static float row_text_width(const u8 *instr);
 
 typedef struct { H token; char name[96]; } Entry;
 static Entry g_entries[2048];
@@ -129,12 +131,71 @@ static const char *token_name(const u8 *tok) {
 static int is_hash_carrier(const u8 *tok) {
     const char *nm = token_name(tok);
     if (!nm || !nm[0] || nm[0] == '<') return 0;
+    if (!strcmp(nm, "cond_token_payload")) return 1;
     if (!strcmp(nm, "cond_payload")) return 1;
     if (!strcmp(nm, "jump_payload")) return 1;
     if (!strcmp(nm, "exec_payload")) return 1;
     if (!strcmp(nm, "cond_reexec")) return 1;
     return 0;
 }
+
+/* Header chrome buttons to the right of title text.
+ * layout: [title]  [提交] [合闸] / [推荐]
+ * pad0 bit0 = latch.
+ */
+#define BTN_H 18.0f
+#define BTN_GAP 6.0f
+#define BTN_PAD 8.0f
+static float btn_w(const char *label) {
+    float w = measure_str(13.0f, label) + 12.0f;
+    if (w < 36.0f) w = 36.0f;
+    return w;
+}
+/* Returns total header width including buttons (for hit tests). */
+static float header_total_width(u32 vi, const View *v, int dirty, int show_rec) {
+    float tw = title_text_width(vi, v);
+    float x = tw + 10.0f;
+    int latch = (v->pad0 & 1u) != 0;
+    if (dirty && !latch) x += btn_w("commit") + BTN_GAP;
+    x += btn_w(latch ? "latch*" : "latch") + BTN_GAP;
+    if (show_rec && !dirty) x += btn_w("vote") + BTN_GAP;
+    return x;
+}
+/* Which header button under (mx,my)? 0=none 1=commit 2=latch 3=vote */
+static int header_btn_hit(u32 vi, const View *v, float mx, float my, float title_h,
+                          int dirty, int show_rec) {
+    if (my < v->y - title_h || my >= v->y) return 0;
+    float tw = title_text_width(vi, v);
+    float x = v->x + tw + 10.0f;
+    float by = v->y - title_h + 4.0f;
+    int latch = (v->pad0 & 1u) != 0;
+    if (dirty && !latch) {
+        float w = btn_w("commit");
+        if (mx >= x && mx < x + w && my >= by && my < by + BTN_H) return 1;
+        x += w + BTN_GAP;
+    }
+    {
+        float w = btn_w(latch ? "latch*" : "latch");
+        if (mx >= x && mx < x + w && my >= by && my < by + BTN_H) return 2;
+        x += w + BTN_GAP;
+    }
+    if (show_rec && !dirty) {
+        float w = btn_w("vote");
+        if (mx >= x && mx < x + w && my >= by && my < by + BTN_H) return 3;
+    }
+    return 0;
+}
+
+/* Parse cond_token_payload layout. Returns 1 if token-like. */
+static int cond_token_parse(const u8 *payload, u32 pn, u8 tok_out[32], u32 *uid, u8 *once, u8 *conti) {
+    if (pn < 32) return 0;
+    if (tok_out) memcpy(tok_out, payload, 32);
+    if (uid) *uid = (pn >= 36) ? *(u32*)(payload + 32) : 0;
+    if (once) *once = (pn >= 38) ? payload[36] : 0;
+    if (conti) *conti = (pn >= 38) ? payload[37] : 0;
+    return 1;
+}
+
 static void payload_summary(const u8 *instr, char *out, u32 outn) {
     u32 pn = *(u32 *)(instr + 32);
     if (!pn) { out[0] = 0; return; }
@@ -148,7 +209,7 @@ static void payload_summary(const u8 *instr, char *out, u32 outn) {
 static float row_text_width(const u8 *instr) {
     const char *nm = token_name(instr);
     float icon = NAME_SIZE;
-    float w = 4.0f + 4.0f;
+    float w = 2.0f; /* no left swatch */
     int is_var = 0;
     if (nm) {
         if (!strcmp(nm, "var_set_payload") || !strcmp(nm, "var_read_payload") ||

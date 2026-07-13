@@ -1,83 +1,15 @@
 #include "views_common.h"
 #include <stdlib.h>
+extern __declspec(dllimport) int cvm_key_dirty(const H key);
+extern __declspec(dllimport) float cvm_heat_node(const H key);
+extern __declspec(dllimport) float cvm_heat_uid(u32 uid);
 
-#define COL_DEFAULT   0xffe8ecef
-#define COL_SUM       0xff7fb8d8
-#define COL_VAR_ID    0xffc8e0a0
-#define COL_VAR_SIZE  0xffe8c878
-#define COL_END       0xff66717d
-#define COL_SW_NONE   0xff3a424a
-#define ICON_GAP 6.0f
-#define SWATCH_W 4.0f
-
-static int same32(const u8 *a, const u8 *b) { return !memcmp(a, b, 32); }
-
-static void fmt_id(const u8 *id, u32 n, char *out, u32 outn) {
-    if (!n) { snprintf(out, outn, "<>"); return; }
-    int printable = 1;
-    for (u32 i = 0; i < n; i++) if (id[i] < 32 || id[i] > 126) { printable = 0; break; }
-    if (printable) {
-        u32 z = n < outn - 3 ? n : outn - 3;
-        snprintf(out, outn, "%.*s", (int)z, (const char *)id);
-        return;
-    }
-    u32 show = n < 12 ? n : 12;
-    u32 pos = 0;
-    for (u32 i = 0; i < show && pos + 2 < outn; i++)
-        pos += (u32)snprintf(out + pos, outn - pos, "%02x", id[i]);
-    if (n > show && pos + 2 < outn) snprintf(out + pos, outn - pos, "..");
+static void draw_btn(float x, float y, float w, const char *label, u32 bg, u32 fg) {
+    dxgfx_draw_rect(x, y, w, BTN_H, bg, 1.0f, 1);
+    dxgfx_draw_text((int)(x + 6.0f), (int)(y + 1.0f), fg, 13.0f, label, (u32)strlen(label));
 }
 
-/* Minimal row summary: no specialized registry of token types beyond name. */
-static void row_summary(const u8 *tok, const u8 *payload, u32 pn, char *sum, u32 sumn,
-                        char *id_text, u32 idn, char *extra, u32 en, int *is_var) {
-    sum[0]=id_text[0]=extra[0]=0; *is_var=0;
-    const char *nm = token_name(tok);
-    if (nm && (!strcmp(nm,"var_read_payload") || !strcmp(nm,"var_write_payload") || !strcmp(nm,"var_set_payload")
-        || !strcmp(nm,"var_read") || !strcmp(nm,"var_write") || !strcmp(nm,"var_set"))) {
-        *is_var = 1;
-        if (!strcmp(nm,"var_read_payload")) { fmt_id(payload, pn, id_text, idn); return; }
-        if (!strcmp(nm,"var_set") || !strcmp(nm,"var_read") || !strcmp(nm,"var_write")) {
-            snprintf(id_text, idn, "%s", nm+4); return;
-        }
-        if (pn >= 4) {
-            u32 id_len = *(u32*)payload;
-            if (id_len > 0 && id_len <= 256 && pn >= 4 + id_len) {
-                fmt_id(payload+4, id_len, id_text, idn);
-                u32 rest = pn - 4 - id_len;
-                if (!strcmp(nm,"var_set_payload") && rest == 4)
-                    snprintf(extra, en, "%u", *(u32*)(payload+4+id_len));
-                else if (rest) snprintf(extra, en, "%uB", rest);
-                return;
-            }
-        }
-        if (pn >= 32) {
-            fmt_id(payload, 32, id_text, idn);
-            if (pn == 36) snprintf(extra, en, "%u", *(u32*)(payload+32));
-            else if (pn > 32) snprintf(extra, en, "%uB", pn-32);
-            return;
-        }
-        return;
-    }
-    if (pn == 0) return;
-    if (nm && !strcmp(nm, "cond_payload") && pn >= 32) {
-        snprintf(sum, sumn, "-> %s", token_name(payload));
-        return;
-    }
-    if (pn == 4) {
-        u32 v = *(u32*)payload;
-        if (v < 0x10000u) snprintf(sum, sumn, "%u", v);
-        else snprintf(sum, sumn, "%g", (double)*(float*)payload);
-        return;
-    }
-    u32 z = pn < 42 ? pn : 42;
-    int printable = 1;
-    for (u32 j = 0; j < z; j++) if (payload[j] < 32 || payload[j] > 126) { printable = 0; break; }
-    if (printable) snprintf(sum, sumn, "'%.*s'", (int)z, (const char*)payload);
-    else snprintf(sum, sumn, "[%u bytes]", pn);
-}
-
-/* payload: views_var[32] — draw view titles / active highlight */
+/* payload: views_var — draw titles + commit/latch/vote chrome + heat white frame */
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; if (!payload_id(&id, &id_len, 0, 0)) { cont(); return; }
     Table *t = load_table(id, id_len); if (!t) { cont(); return; }
@@ -89,12 +21,71 @@ __declspec(dllexport) void run(void){
         char title[120];
         snprintf(title, sizeof(title), "[%u] %s", vi, dname);
         float title_w = measure_str(16.0f, title);
+        int dirty = 0;
+        if (!key_is_tag(v->key)) dirty = cvm_key_dirty(v->key);
+        int latch = (v->pad0 & 1u) != 0;
+        int show_rec = !dirty && !key_is_tag(v->key);
+
+        /* Heat white frame: max cond_token uid heat in this block (or node map). */
+        {
+            float heat = cvm_heat_node(v->key);
+            if (!key_is_tag(v->key)) {
+                H hh; cvm_resolve_payload_hash(v->key, hh);
+                u8 *b = cvm_cached_base();
+                u32 n = cvm_cached_len();
+                u32 o = 0;
+                while (o + 36 <= n && !zero_key(b + o)) {
+                    u32 pn = *(u32*)(b + o + 32);
+                    if (o + 36 + pn > n) break;
+                    const char *nm = token_name(b + o);
+                    if (nm && !strcmp(nm, "cond_token_payload") && pn >= 36) {
+                        u32 uid = *(u32*)(b + o + 36 + 32);
+                        float h2 = cvm_heat_uid(uid);
+                        if (h2 > heat) heat = h2;
+                    }
+                    o += 36 + pn;
+                }
+            }
+            if (heat > 0.05f) {
+                float rows = 8.0f;
+                if (key_is_tag(v->key)) rows = (float)tag_child_count(v->key) + 1.0f;
+                else rows = (float)block_row_count(v) + 1.0f;
+                float body_h = rows * 24.0f + 8.0f;
+                float body_w = header_total_width(vi, v, dirty, show_rec);
+                if (body_w < 120.0f) body_w = 120.0f;
+                /* alpha-ish via brightness on white border */
+                u32 a = (u32)(heat * 255.0f); if (a > 255) a = 255;
+                u32 col = 0x00ffffffu | (a << 24);
+                dxgfx_draw_rect(v->x - 10.0f, v->y - 34.0f, body_w + 16.0f, body_h + 36.0f, col, 2.0f, 0);
+            }
+        }
+
         if (vi == t->active) {
             float tw = title_w + 16.0f;
             if (tw < 72.0f) tw = 72.0f;
             dxgfx_draw_rect(v->x - 6.0f, v->y - 30.0f, tw, 22.0f, 0xff2a333c, 1.0f, 1);
         }
         dxgfx_draw_text((int)v->x, (int)(v->y - 28.0f), 0xff9da7b3, 16.0f, title, (u32)strlen(title));
+
+        /* Buttons to the right of title */
+        float bx = v->x + title_w + 10.0f;
+        float by = v->y - 28.0f;
+        if (dirty && !latch) {
+            float w = btn_w("commit");
+            draw_btn(bx, by, w, "commit", 0xff3a6ea5, 0xffe8ecef);
+            bx += w + BTN_GAP;
+        }
+        {
+            const char *lb = latch ? "latch*" : "latch";
+            float w = btn_w(lb);
+            u32 bg = latch ? 0xff2f6f4e : 0xff3a424a;
+            draw_btn(bx, by, w, lb, bg, 0xffe8ecef);
+            bx += w + BTN_GAP;
+        }
+        if (show_rec) {
+            float w = btn_w("vote");
+            draw_btn(bx, by, w, "vote", 0xff6b4f9a, 0xffe8ecef);
+        }
     }
     cont();
 }

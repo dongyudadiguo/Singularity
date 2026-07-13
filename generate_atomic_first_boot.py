@@ -1,4 +1,5 @@
 import hashlib
+import random
 import json
 import struct
 from pathlib import Path
@@ -81,7 +82,7 @@ PART_ZOOM_Y = part_key("zoom_y")
 PART_DRAG_XY = part_key("drag_xy")
 PART_RMB_OPEN = part_key("rmb_open")
 
-ACTION_CORE = ("delete", "insert", "backspace", "clear")
+ACTION_CORE = ("delete", "insert", "insert_hash", "insert_var_read", "insert_var_write", "backspace", "clear")
 ACTION_POINTER = (
     "pan", "click", "rmb", "drag", "end_drag",
     "begin_pan", "end_pan", "begin_drag_anchor", "begin_title_drag",
@@ -155,7 +156,19 @@ def views_call(t, op_name, args=b""):
     return (t[op_name], views_var_payload(args))
 
 
-def cond_action(t, key):
+def cond_tok_payload(target_key, once=0, continuous=1, uid=None):
+    """cond_token_payload bytes: token[32]+uid[u32]+once+continuous+pad2"""
+    if uid is None:
+        uid = random.getrandbits(32)
+        if uid == 0:
+            uid = 1
+    return target_key + u32(uid) + bytes([once & 1, continuous & 1, 0, 0])
+
+
+def cond_action(t, key, once=0, continuous=1):
+    """Prefer cond_token_payload; falls back only if token missing at gen time."""
+    if "cond_token_payload" in t:
+        return (t["cond_token_payload"], cond_tok_payload(key, once=once, continuous=continuous))
     return (t["cond_payload"], key)
 
 
@@ -240,7 +253,7 @@ def build_click(t, action_keys):
         views_call(t, "views_get_dragging"),
         (t["const_payload"], i32(-1)),
         (t["neq"], b""),
-        (t["cond_payload"], action_keys["begin_title_drag"]),
+        cond_action(t, action_keys["begin_title_drag"]),
     ]
 
 
@@ -257,23 +270,37 @@ def build_editor_actions(t):
     # Only actions that bind payload/state — pure aliases of existing facets
     # (cursor_add/cursor_dec) are NOT re-wrapped as actions.
     # string edits: stack string ops + var_read/var_write (no string_*_var natives).
+    clear_input = [
+        (t["const_payload"], bytes(256)), (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
+    ]
     return {
         "delete": make_block(sel(t) + cur(t) + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
+        # Tab: completion token (prefix match)
         "insert": make_block(sel(t) + cur(t) + [
             (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
             (t["block_insert_stack"], b""),
-            # clear input: write 256 zero bytes
-            (t["const_payload"], bytes(256)), (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
-            (t["jump_payload"], PROGRAM_KEY),
-        ]),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        # Space: hash(input) as token
+        "insert_hash": make_block(sel(t) + cur(t) + [
+            (t["sha256_var_payload"], INPUT_VAR),
+            (t["block_insert_stack"], b""),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        # Alt: empty var_read_payload + select that row (cursor already at insert gap)
+        "insert_var_read": make_block(sel(t) + cur(t) + [
+            (t["const_payload"], t["var_read_payload"]),
+            (t["block_insert_stack"], b""),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        # Shift+Alt: empty var_write_payload
+        "insert_var_write": make_block(sel(t) + cur(t) + [
+            (t["const_payload"], t["var_write_payload"]),
+            (t["block_insert_stack"], b""),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
         "backspace": make_block([
             (t["var_read_payload"], INPUT_VAR),
             (t["string_backspace"], u32(256)),
             (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
         ]),
-        "clear": make_block([
-            (t["const_payload"], bytes(256)), (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
-        ]),
+        "clear": make_block(clear_input),
     }
 
 
@@ -389,32 +416,34 @@ def part_status(t):
 
 
 def part_typein(t):
-    # typein = text_input + (var_read + string_append + var_write) + draw
-    # no specialized string_append_var / drawtext_var_* wrappers
+    # typein follows mouse pointer in screen space (not affected by camera zoom)
     return [
         (t["var_read_payload"], INPUT_VAR),
         (t["text_input"], b""),
         (t["string_append"], u32(256) + u32(256)),
         (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
-        (t["screen_size"], b""), (t["i32_to_f32"], b""),
-        (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
-        (t["swap_u32"], b""), (t["drop_u32"], b""),
-        (t["f32_const"], f32(20.0)), (t["swap_u32"], b""),
+        # position: mouse screen + offset
+        (t["mouse_f"], b""),  # mx, my
+        (t["f32_const"], f32(18.0)), (t["f32_add"], b""),  # my+18
+        (t["swap_u32"], b""),
+        (t["f32_const"], f32(14.0)), (t["f32_add"], b""),  # mx+14
+        (t["swap_u32"], b""),
         (t["var_read_payload"], INPUT_VAR),
         (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xffffffff, 17.0, 256)),
     ]
 
 
 def part_match(t):
-    # match label x = measure(input)+pad; show tag-graph path (name_lookup -> path[160])
+    # completion path follows mouse; x = mouse_x + measure(input) + pad
     return [
-        (t["screen_size"], b""), (t["i32_to_f32"], b""),
-        (t["f32_const"], f32(52.0)), (t["f32_sub"], b""),
-        (t["swap_u32"], b""), (t["drop_u32"], b""),
+        (t["mouse_f"], b""),  # mx, my
+        (t["f32_const"], f32(18.0)), (t["f32_add"], b""),  # my+18
+        (t["swap_u32"], b""),  # my', mx
         (t["var_read_payload"], INPUT_VAR),
         (t["measure_text"], f32(17.0) + u32(256)),
-        (t["f32_const"], f32(32.0)), (t["f32_add"], b""),
-        (t["swap_u32"], b""),
+        (t["f32_const"], f32(28.0)), (t["f32_add"], b""),
+        (t["f32_add"], b""),  # mx + measure + pad
+        (t["swap_u32"], b""),  # x, y
         (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
         (t["name_lookup"], b""),
         (t["drawtext_xy_stack_screen"], struct.pack("<IfI", 0xff73808c, 17.0, 160)),
@@ -430,10 +459,23 @@ def part_nav(t, action_keys):
 
 
 def part_editkeys(t, action_keys):
+    # Space=hash token; Tab=completion; Alt=var_read; Shift+Alt=var_write
+    # Alt = VK_MENU 0x12; Shift = VK_SHIFT 0x10
     return [
         (t["key_pressed"], u32(0x2e)), cond_action(t, action_keys["delete"]),
-        (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["insert"]),
+        (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["insert_hash"]),
         (t["key_pressed"], u32(0x09)), cond_action(t, action_keys["insert"]),
+        # Shift+Alt (shift down && alt pressed)
+        (t["key_down"], u32(0x10)),
+        (t["key_pressed"], u32(0x12)),
+        (t["and"], b""),
+        cond_action(t, action_keys["insert_var_write"]),
+        # Alt alone (alt pressed && !shift)
+        (t["key_pressed"], u32(0x12)),
+        (t["key_down"], u32(0x10)),
+        (t["not"], b""),
+        (t["and"], b""),
+        cond_action(t, action_keys["insert_var_read"]),
         (t["key_pressed"], u32(0x08)), cond_action(t, action_keys["backspace"]),
         (t["key_pressed"], u32(0x1b)), cond_action(t, action_keys["clear"]),
     ]
@@ -487,7 +529,7 @@ def mod_camera_apply(t):
 def mod_zoom(t, zoom_apply_key):
     return [
         (t["mouse_wheel"], b""),
-        (t["cond_payload"], zoom_apply_key),
+        cond_action(t, zoom_apply_key),
     ]
 
 
@@ -543,7 +585,7 @@ def build_rmb(t, action_keys):
         views_call(t, "views_get_dragging"),
         (t["const_payload"], i32(-1)),
         (t["neq"], b""),
-        (t["cond_payload"], action_keys["begin_title_drag"]),
+        cond_action(t, action_keys["begin_title_drag"]),
     ]
 
 
@@ -596,6 +638,7 @@ def build_native_surfaces(t):
 
     render_leaf_key = part_key("views.render_draw")
     render_leaf = make_block([
+        views_call(t, "views_latch_tick"),
         views_call(t, "views_paint_links"),
         views_call(t, "views_paint_titles"),
         views_call(t, "views_paint_rows"),
@@ -632,14 +675,15 @@ def main():
         "frame_begin", "frame_clear", "frame_end", "reexec", "camera_set_stack",
         "drawtext_screen", "drawtext_xy_stack_screen",
         "const_payload", "var_set_payload", "var_read_payload", "var_write_payload",
-        "key_pressed", "cond_payload", "name_prefix_find", "name_lookup",
+        "key_pressed", "key_down", "cond_token_payload", "cond_payload", "name_prefix_find", "name_lookup",
+        "sha256_var_payload", "mouse_f",
         "text_input", "string_append", "string_backspace",
         "block_insert_stack", "block_delete",
         "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down",
         "i32_to_f32", "i32_add", "i32_min", "i32_max", "eq",
         "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
         "world_mouse", "drop_u32", "swap_u32", "dup_u32",
-        "views_paint_links", "views_paint_titles", "views_paint_rows",
+        "views_paint_links", "views_paint_titles", "views_paint_rows", "views_latch_tick",
         "views_ensure", "views_active_key", "views_active_cursor",
         "views_set_cursor_active", "views_drag_end",
         "views_get_drag_xy", "views_set_drag_xy",

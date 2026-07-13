@@ -470,3 +470,166 @@ __declspec(dllexport) void cvm_edge(const H parent, const H child) {
     r = recv_frame(&st, &n);
     free(r);
 }
+
+/* === editor support: dirty / vote / heat / flush_key === */
+
+__declspec(dllexport) int cvm_cache_dirty(void) {
+    CacheSlot *s = &slots[primary_idx];
+    H cur;
+    if (!s->on) return 0;
+    if (!sha256(s->data, s->len, cur)) return 0;
+    return !same(cur, s->hash);
+}
+
+/* Resolve key into primary cache, then report dirty vs last-flushed hash. */
+__declspec(dllexport) int cvm_key_dirty(const H key) {
+    H h;
+    if (!key) return 0;
+    cvm_resolve_payload_hash(key, h);
+    {
+        CacheSlot *s = &slots[primary_idx];
+        H cur;
+        if (!s->on || !same(s->key, key)) return 0;
+        if (!sha256(s->data, s->len, cur)) return 0;
+        return !same(cur, s->hash);
+    }
+}
+
+__declspec(dllexport) void cvm_flush_key(const H key) {
+    H h;
+    if (!key) return;
+    cvm_resolve_payload_hash(key, h);
+    {
+        CacheSlot *s = &slots[primary_idx];
+        if (!s->on || !same(s->key, key)) return;
+        upload(s->data, s->len, h);
+        if (!same(h, s->hash)) {
+            uset(s->key, h);
+            memcpy(s->hash, h, 32);
+            cvm_override_cache_invalidate(s->key);
+        }
+    }
+}
+
+/* OP_VOTE = 6; body: user[32]+parent[32]+child[32] */
+__declspec(dllexport) void cvm_vote(const H parent, const H child) {
+    u8 st, b[96], *r;
+    u32 n;
+    load_id();
+    memcpy(b, id, 32);
+    memcpy(b + 32, parent, 32);
+    memcpy(b + 64, child, 32);
+    send_op(6, b, 96);
+    r = recv_frame(&st, &n);
+    free(r);
+}
+
+/* Heat: per-uid brightness with ~1s decay; also track node keys. */
+#define HEAT_CAP 256
+typedef struct {
+    u32 uid;
+    float bright;
+    int on;
+    H node;
+    int has_node;
+} HeatEnt;
+static HeatEnt g_heat[HEAT_CAP];
+static DWORD g_heat_last_ms;
+
+static float heat_now_sec(void) {
+    return (float)GetTickCount() * 0.001f;
+}
+
+static void heat_decay_all(void) {
+    DWORD now = GetTickCount();
+    float dt;
+    if (!g_heat_last_ms) { g_heat_last_ms = now; return; }
+    dt = (float)(now - g_heat_last_ms) * 0.001f;
+    if (dt < 0.0f) dt = 0.0f;
+    if (dt > 0.25f) dt = 0.25f; /* clamp large stalls */
+    g_heat_last_ms = now;
+    if (dt <= 0.0f) return;
+    /* half-life ~0.45s => per-second multiply ~0.22 */
+    {
+        float k = 1.0f;
+        /* approx exp(-1.5 * dt) */
+        float x = 1.5f * dt;
+        k = 1.0f - x + 0.5f * x * x; /* cheap exp approx for small x */
+        if (k < 0.05f) k = 0.05f;
+        if (dt > 0.05f) {
+            /* better for larger steps */
+            int n = (int)(dt * 60.0f);
+            if (n < 1) n = 1;
+            if (n > 30) n = 30;
+            k = 1.0f;
+            for (int i = 0; i < n; i++) k *= 0.975f; /* ~1.5/s at 60fps */
+        }
+        for (int i = 0; i < HEAT_CAP; i++) {
+            if (!g_heat[i].on) continue;
+            g_heat[i].bright *= k;
+            if (g_heat[i].bright < 0.02f) {
+                g_heat[i].on = 0;
+                g_heat[i].bright = 0.0f;
+                g_heat[i].has_node = 0;
+            }
+        }
+    }
+}
+
+__declspec(dllexport) void cvm_heat_pulse(u32 uid, const H node_key) {
+    int free_i = -1;
+    int oldest = 0;
+    float oldest_b = 1e9f;
+    heat_decay_all();
+    if (uid == 0) return;
+    for (int i = 0; i < HEAT_CAP; i++) {
+        if (g_heat[i].on && g_heat[i].uid == uid) {
+            g_heat[i].bright += 0.55f;
+            if (g_heat[i].bright > 1.0f) g_heat[i].bright = 1.0f;
+            if (node_key) {
+                memcpy(g_heat[i].node, node_key, 32);
+                g_heat[i].has_node = 1;
+            }
+            return;
+        }
+        if (!g_heat[i].on && free_i < 0) free_i = i;
+        if (g_heat[i].on && g_heat[i].bright < oldest_b) {
+            oldest_b = g_heat[i].bright;
+            oldest = i;
+        }
+    }
+    {
+        int i = free_i >= 0 ? free_i : oldest;
+        memset(&g_heat[i], 0, sizeof(g_heat[i]));
+        g_heat[i].on = 1;
+        g_heat[i].uid = uid;
+        g_heat[i].bright = 0.55f; /* single hit still visible */
+        if (node_key) {
+            memcpy(g_heat[i].node, node_key, 32);
+            g_heat[i].has_node = 1;
+        }
+    }
+}
+
+__declspec(dllexport) float cvm_heat_uid(u32 uid) {
+    heat_decay_all();
+    if (!uid) return 0.0f;
+    for (int i = 0; i < HEAT_CAP; i++)
+        if (g_heat[i].on && g_heat[i].uid == uid) return g_heat[i].bright;
+    return 0.0f;
+}
+
+__declspec(dllexport) float cvm_heat_node(const H key) {
+    float m = 0.0f;
+    heat_decay_all();
+    if (!key) return 0.0f;
+    for (int i = 0; i < HEAT_CAP; i++) {
+        if (!g_heat[i].on || !g_heat[i].has_node) continue;
+        if (same(g_heat[i].node, key) && g_heat[i].bright > m) m = g_heat[i].bright;
+    }
+    return m;
+}
+
+__declspec(dllexport) void cvm_heat_tick(void) {
+    heat_decay_all();
+}
