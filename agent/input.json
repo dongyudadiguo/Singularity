@@ -1180,6 +1180,10 @@
         "role": "assistant",
         "content": "装好并重启 `vm.exe` 后，这版行为如下。\n\n## 已落地\n\n### 节点头\n| 按钮 | 条件 | 作用 |\n|------|------|------|\n| **commit** | 有本地改动且未合闸 | 对该节点 `uset` 一次 |\n| **latch / latch\\*** | 始终 | 合闸开关；开着时脏了会自动 uset |\n| **vote** | 无改动 | 推荐：节点 key → 块内每个 token 的边（`OP_VOTE`） |\n\n### 显示\n- 去掉 token 左侧色条（DLL/override 仍用名字颜色）\n- 补全 / 输入跟**鼠标屏幕坐标**，不受缩放影响\n- 指针附近 token 缝画绿色插入指示；悬停会把 active/cursor 对准该缝\n\n### 快捷键\n| 键 | 行为 |\n|----|------|\n| **Space** | 插入 `sha256(输入文本)` 当 token |\n| **Tab** | 插入补全候选 |\n| **Alt** | 插入空 `var_read_payload` 并落在该行 |\n| **Shift+Alt** | 插入空 `var_write_payload` |\n| Del / Backspace / Esc | 删指令 / 退格输入 / 清空输入 |\n\n### `cond_token_payload`\n- 布局：`token[32] + uid[u32] + once + continuous + pad`\n- 首启配方已全面改用它（uid 在生成/插入时随机）\n- 连线中点：**1x** / **oo**（持续为真时隐藏 1x）\n- 热力：一帧多执行更亮，约秒级淡出；画在 cond 行、连线，节点亮时白框\n\n### 底层\n- `vmstore`：`cvm_key_dirty` / `cvm_flush_key` / `cvm_vote` / heat API  \n- 新 mods：`cond_token_payload`、`sha256_var_payload`、`views_latch_tick` 等  \n\n`id.bin` 仍是 `5673fae3…`，未动。\n\n---\n\n请在编辑器里扫一眼：\n1. 改节点后是否出现 **commit**，点后是否消失  \n2. **latch\\*** 是否持续提交  \n3. 干净节点 **vote** 是否可用  \n4. 鼠标旁补全 + 缝指示 + Space/Tab/Alt  \n5. 打开 cond 连线后中点 1x/oo，以及运行时热力  \n\n有不对的点直接说现象（或截图描述），我按项改。",
         "reasoning_content": "The user said \"已装好。**请重启 `vm.exe`** 加载新的 `vmstore.dll` 与 mods。\" which seems like they're acknowledging they installed it and are being told to restart, OR they're quoting my message, OR they want me to confirm/continue.\n"
+      },
+      {
+        "role": "user",
+        "content": "我输入abc然后对着reexec和<end>之间的空隙按空格,然后发现并没有插入abc到那，我试了试add也一样,然后我试着对其他地方也是一样，没有发生什么事,只是输入的字符串被清空了.\r\n不能点选某个token，尝试编辑变量，根本编辑不了\r\n对任意地方按ALT键，会导致画面卡住,并且鼠标点击一下会解卡，解卡之后，发现什么事情都没发生\r\ncond_token_payload的右边有蓝色文字,然后我右键对着这个蓝色文字拖出\r\n结果发现拖出的是cond_token_payload的firstchild 节点\r\n而且网络探索节点怎么也显示latch? 网络探索节点也要可以进行空格和tab来加入child如果没有的话,而且也能投票\r\ncond_token_payload 要亮的节点是目标节点，而不是所在的节点\r\n而且cond_reexec也要像cond_token_payload那样，并且要亮的就是该token所在的节点了\r\n按CTRL键可以插入 cond_token_payload，同时应用输入做 hash 当 token，但如果输入为空 就用随机token, 稍后可以通过某种方式来改名,比如说双击要改名的token，然后直接打字编辑"
       }
     ],
     "tools": [
