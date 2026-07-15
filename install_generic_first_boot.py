@@ -5,7 +5,7 @@ import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SERVER = ("118.25.42.70", 9000)
+SERVER = ("127.0.0.1", 9000)
 
 OP_UPLOAD = 2
 OP_FILE = 3
@@ -180,7 +180,7 @@ def classify_native(name: str) -> str:
         "and", "or", "not", "eq", "neq", "gt", "lt", "gte", "lte",
     }:
         return "#ops"
-    if name in {"drop_u32", "dup_u32", "swap_u32", "const_payload"}:
+    if name in {"drop_u32", "dup_u32", "swap_u32", "const_payload", "mark", "back"}:
         return "#stack"
     if name in {
         "cond_payload", "jump_payload", "reexec", "exec", "exec_payload",

@@ -19,6 +19,7 @@ __declspec(dllexport) void run(void){
     for (u32 vi = 0; vi < t->count; vi++) {
         View *v = &t->views[vi];
         if (!v->used) continue;
+        float dx = view_draw_x(t, vi);
         char dname[80];
         key_display_name(v->key, dname, sizeof(dname));
         char title[120];
@@ -42,18 +43,22 @@ __declspec(dllexport) void run(void){
                 if (body_w < 120.0f) body_w = 120.0f;
                 u32 a = (u32)(heat * 255.0f); if (a > 255) a = 255;
                 u32 col = 0x00ffffffu | (a << 24);
-                dxgfx_draw_rect(v->x - 10.0f, v->y - 34.0f, body_w + 16.0f, body_h + 36.0f, col, 2.0f, 0);
+                dxgfx_draw_rect(dx - 10.0f, v->y - 34.0f, body_w + 16.0f, body_h + 36.0f, col, 2.0f, 0);
             }
         }
 
         if (vi == t->active) {
             float tw = title_w + 16.0f;
             if (tw < 72.0f) tw = 72.0f;
-            dxgfx_draw_rect(v->x - 6.0f, v->y - 30.0f, tw, 22.0f, 0xff2a333c, 1.0f, 1);
+            dxgfx_draw_rect(dx - 6.0f, v->y - 30.0f, tw, 22.0f, 0xff2a333c, 1.0f, 1);
         }
-        dxgfx_draw_text((int)v->x, (int)(v->y - 28.0f), 0xff9da7b3, 16.0f, title, (u32)strlen(title));
+        dxgfx_draw_text((int)dx, (int)(v->y - 28.0f), 0xff9da7b3, 16.0f, title, (u32)strlen(title));
+        /* Indent gutter mark */
+        if (view_depth(t, vi) > 0) {
+            dxgfx_draw_rect(dx - 10.0f, v->y - 28.0f, 2.0f, 20.0f, 0xff4a5560, 1.0f, 1);
+        }
 
-        float bx = v->x + title_w + 10.0f;
+        float bx = dx + title_w + 10.0f;
         float by = v->y - 28.0f;
         if (show_commit) {
             float w = btn_w("commit");

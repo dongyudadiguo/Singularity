@@ -107,6 +107,7 @@ __declspec(dllexport) void run(void){
     for (u32 vi = 0; vi < t->count; vi++) {
         View *v = &t->views[vi];
         if (!v->used) continue;
+        float dx = view_draw_x(t, vi);
 
         if (key_is_tag(v->key)) {
             u32 row = 0;
@@ -123,14 +124,14 @@ __declspec(dllexport) void run(void){
                 float total_w = 4.0f + name_w + mark_w + PAD_X;
                 if (total_w < MIN_HIT_W) total_w = MIN_HIT_W;
                 int selected = (vi == t->active && row == v->cursor);
-                if (selected) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, total_w, 23.0f, 0xff34414d, 1.0f, 1);
+                if (selected) dxgfx_draw_rect(dx - 7.0f, ry - 2.0f, total_w, 23.0f, 0xff34414d, 1.0f, 1);
                 u32 col = is_tag ? 0xffe0a050 : 0xffe8ecef;
-                dxgfx_draw_text((int)v->x, (int)ry, col, NAME_SIZE, nm, (u32)strlen(nm));
+                dxgfx_draw_text((int)dx, (int)ry, col, NAME_SIZE, nm, (u32)strlen(nm));
                 if (is_tag) {
-                    float cx = v->x + name_w + NAME_GAP;
+                    float cx = dx + name_w + NAME_GAP;
                     dxgfx_draw_text((int)cx, (int)ry, 0xff7fb8d8, SUM_SIZE, "tag", 3);
                 }
-                if (wmx >= v->x - 20.0f && wmx <= v->x + total_w + 40.0f) {
+                if (wmx >= dx - 20.0f && wmx <= dx + total_w + 40.0f) {
                     float d = wmy - ry; if (d < 0) d = -d;
                     if (d < best_d && d < 14.0f) { best_d = d; g_gap_vi = (int)vi; g_gap_row = row; }
                 }
@@ -140,9 +141,9 @@ __declspec(dllexport) void run(void){
             float end_w = measure_str(16.0f, "<end>") + 14.0f;
             if (end_w < 48.0f) end_w = 48.0f;
             int end_sel = (vi == t->active && row == v->cursor);
-            if (end_sel) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, end_w, 23.0f, 0xff34414d, 1.0f, 1);
-            dxgfx_draw_text((int)v->x, (int)ry, COL_END, 16.0f, "<end>", 5);
-            if (wmx >= v->x - 20.0f && wmx <= v->x + end_w + 40.0f) {
+            if (end_sel) dxgfx_draw_rect(dx - 7.0f, ry - 2.0f, end_w, 23.0f, 0xff34414d, 1.0f, 1);
+            dxgfx_draw_text((int)dx, (int)ry, COL_END, 16.0f, "<end>", 5);
+            if (wmx >= dx - 20.0f && wmx <= dx + end_w + 40.0f) {
                 float d = wmy - ry; if (d < 0) d = -d;
                 if (d < best_d && d < 14.0f) { best_d = d; g_gap_vi = (int)vi; g_gap_row = row; }
             }
@@ -154,6 +155,7 @@ __declspec(dllexport) void run(void){
         u32 n = cvm_cached_len();
         u32 o = 0, row = 0;
         float ry = v->y;
+        int mark_depth = 0;
         while (bl_ok(b, n, o) && !bl_is_end(b + o)) {
             u32 tlen = bl_tlen(b + o);
             const u8 *tok = bl_token_c(b + o);
@@ -181,7 +183,7 @@ __declspec(dllexport) void run(void){
                 if (heat > 0.05f) {
                     u32 a = (u32)(heat * 180.0f); if (a > 180) a = 180;
                     u32 bg = 0x002a5080u | (a << 24);
-                    dxgfx_draw_rect(v->x - 8.0f, ry - 2.0f, 220.0f, 23.0f, bg, 1.0f, 1);
+                    dxgfx_draw_rect(dx - 8.0f, ry - 2.0f, 220.0f, 23.0f, bg, 1.0f, 1);
                 }
             }
             if (nm && !strcmp(nm, "cond_reexec")) {
@@ -208,9 +210,19 @@ __declspec(dllexport) void run(void){
             if (total_w < MIN_HIT_W) total_w = MIN_HIT_W;
 
             int selected = (vi == t->active && row == v->cursor);
-            if (selected) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, total_w, 23.0f, 0xff34414d, 1.0f, 1);
+            if (selected) dxgfx_draw_rect(dx - 7.0f + (float)mark_depth * 16.0f, ry - 2.0f, total_w, 23.0f, 0xff34414d, 1.0f, 1);
 
-            float tx = v->x;
+            /* mark/back nesting indent inside the instruction list */
+            float row_indent = (float)mark_depth * 16.0f;
+            if (nm && !strcmp(nm, "back") && mark_depth > 0) {
+                /* draw back at parent level then decrease */
+                row_indent = (float)(mark_depth - 1) * 16.0f;
+            }
+            float tx = dx + row_indent;
+            if (nm && !strcmp(nm, "mark")) {
+                /* gutter bar for new scope */
+                dxgfx_draw_rect(tx - 8.0f, ry, 2.0f, 18.0f, 0xff62c982, 1.0f, 1);
+            }
             if (is_var) {
                 float cx = tx;
                 if (has_icon) { dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, name_col, icon_name); cx += icon_sz + ICON_GAP; }
@@ -223,10 +235,13 @@ __declspec(dllexport) void run(void){
                 if (sum[0]) dxgfx_draw_text((int)(cx + NAME_GAP), (int)ry, COL_SUM, SUM_SIZE, sum, (u32)strlen(sum));
             }
 
-            if (wmx >= v->x - 20.0f && wmx <= v->x + total_w + 80.0f) {
+            if (wmx >= dx - 20.0f && wmx <= dx + total_w + 80.0f) {
                 float d = wmy - ry; if (d < 0) d = -d;
                 if (d < best_d && d < 14.0f) { best_d = d; g_gap_vi = (int)vi; g_gap_row = row; }
             }
+
+            if (nm && !strcmp(nm, "mark")) mark_depth++;
+            else if (nm && !strcmp(nm, "back") && mark_depth > 0) mark_depth--;
 
             ry += 24.0f;
             o += bl_instr_size(b + o);
@@ -236,9 +251,9 @@ __declspec(dllexport) void run(void){
         float end_w = measure_str(16.0f, "<end>") + 14.0f;
         if (end_w < 48.0f) end_w = 48.0f;
         int end_sel = (vi == t->active && row == v->cursor);
-        if (end_sel) dxgfx_draw_rect(v->x - 7.0f, ry - 2.0f, end_w, 23.0f, 0xff34414d, 1.0f, 1);
-        dxgfx_draw_text((int)v->x, (int)ry, COL_END, 16.0f, "<end>", 5);
-        if (wmx >= v->x - 20.0f && wmx <= v->x + end_w + 80.0f) {
+        if (end_sel) dxgfx_draw_rect(dx - 7.0f, ry - 2.0f, end_w, 23.0f, 0xff34414d, 1.0f, 1);
+        dxgfx_draw_text((int)dx, (int)ry, COL_END, 16.0f, "<end>", 5);
+        if (wmx >= dx - 20.0f && wmx <= dx + end_w + 80.0f) {
             float d = wmy - ry; if (d < 0) d = -d;
             if (d < best_d && d < 14.0f) { best_d = d; g_gap_vi = (int)vi; g_gap_row = row; }
         }
@@ -246,10 +261,11 @@ __declspec(dllexport) void run(void){
 
     if (g_gap_vi >= 0 && (u32)g_gap_vi < t->count) {
         View *v = &t->views[g_gap_vi];
+        float dx = view_draw_x(t, (u32)g_gap_vi);
         float gy = v->y + (float)g_gap_row * 24.0f;
         float gw = 80.0f;
-        dxgfx_draw_rect(v->x - 10.0f, gy - 1.0f, gw, 2.0f, 0xff62c982, 1.0f, 1);
-        dxgfx_draw_rect(v->x - 10.0f, gy - 5.0f, 3.0f, 10.0f, 0xff62c982, 1.0f, 1);
+        dxgfx_draw_rect(dx - 10.0f, gy - 1.0f, gw, 2.0f, 0xff62c982, 1.0f, 1);
+        dxgfx_draw_rect(dx - 10.0f, gy - 5.0f, 3.0f, 10.0f, 0xff62c982, 1.0f, 1);
         /* Soft insert focus only when mouse buttons up — never fight LMB select. */
         int mstate[4] = {0,0,0,0};
         dxgfx_mouse(mstate);

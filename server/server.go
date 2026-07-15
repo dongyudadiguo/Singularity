@@ -347,7 +347,10 @@ func (a *App) handle(op byte, body []byte) (byte, []byte) {
         defer a.mu.Unlock()
 
         if !a.db.Users[user] {
-            return ERR_DENY, nil
+            if a.secret != "" {
+                return ERR_DENY, nil
+            }
+            a.db.Users[user] = true
         }
 
         if !hasChild(a.db.Graph[parent], child) {
@@ -382,7 +385,11 @@ func (a *App) handle(op byte, body []byte) (byte, []byte) {
         defer a.mu.Unlock()
 
         if !a.db.Users[user] {
-            return ERR_DENY, nil
+            // local/dev: auto-admit unknown identity when no turnstile secret
+            if a.secret != "" {
+                return ERR_DENY, nil
+            }
+            a.db.Users[user] = true
         }
 
         a.db.Vals[UserKey{user, key}] = val
@@ -402,7 +409,10 @@ func (a *App) handle(op byte, body []byte) (byte, []byte) {
         defer a.mu.Unlock()
 
         if !a.db.Users[user] {
-            return ERR_DENY, nil
+            if a.secret != "" {
+                return ERR_DENY, nil
+            }
+            a.db.Users[user] = true
         }
 
         val, found := a.db.Vals[UserKey{user, key}]
@@ -446,7 +456,7 @@ func main() {
         panic(err)
     }
 
-    log.Println("CVM binary TCP server listening on :9000")
+    log.Println("CVM binary TCP server listening on :9000 (local; CF_TURNSTILE_SECRET empty => open admit)")
 
     for {
         c, err := ln.Accept()

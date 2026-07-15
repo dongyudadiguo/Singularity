@@ -79,8 +79,8 @@ __declspec(dllexport) void run(void){
         if (!v->used || !v->linked || v->parent < 0) continue;
         if ((u32)v->parent >= t.count || !t.views[v->parent].used) continue;
         View *p = &t.views[v->parent];
-        float x1 = p->x + v->link_x, y1 = p->y + v->link_y;
-        float x2 = v->x, y2 = v->y;
+        float x1 = view_draw_x(&t, (u32)v->parent) + v->link_x, y1 = p->y + v->link_y;
+        float x2 = view_draw_x(&t, vi), y2 = v->y;
         float midx = (x1 + x2) * 0.5f, midy = (y1 + y2) * 0.5f;
         u32 prow = (u32)row_from_link_y(v->link_y, row_h);
         if (key_is_tag(p->key)) continue;
@@ -116,7 +116,7 @@ __declspec(dllexport) void run(void){
         int dirty = (!is_tag) ? cvm_key_dirty(v->key) : 0;
         int show_rec = is_tag || !dirty;
         int show_latch = !is_tag;
-        int btn = header_btn_hit((u32)i, v, mx, my, title_h, dirty, show_rec, show_latch);
+        int btn = header_btn_hit(&t, (u32)i, v, mx, my, title_h, dirty, show_rec, show_latch);
         if (!btn) continue;
         t.active = (u32)i;
         t.dragging = -1;
@@ -139,8 +139,9 @@ __declspec(dllexport) void run(void){
         int is_tag = key_is_tag(v->key);
         int dirty = (!is_tag) ? cvm_key_dirty(v->key) : 0;
         int show_rec = is_tag || !dirty;
+        float dx = view_draw_x(&t, (u32)i);
         float hw = width + 120.0f;
-        if (mx>=v->x && mx<v->x+hw && my>=v->y-title_h && my<v->y) {
+        if (mx>=dx && mx<dx+hw && my>=v->y-title_h && my<v->y) {
             t.active=(u32)i;
             t.dragging=i;
             handled=1;
@@ -156,7 +157,8 @@ __declspec(dllexport) void run(void){
         int row=(int)(rel/row_h);
         if (row<0 || (u32)row>row_count) continue;
         float width=row_hit_width(v,row);
-        if (mx<v->x || mx>=v->x+width) continue;
+        float dx = view_draw_x(&t, (u32)i);
+        if (mx<dx || mx>=dx+width) continue;
         t.active=(u32)i;
         t.views[i].cursor=(u32)row;
         t.dragging=-1;

@@ -17,9 +17,9 @@ __declspec(dllexport) void run(void){
         if (!v->used || !v->linked || v->parent < 0) continue;
         if ((u32)v->parent >= t->count || !t->views[v->parent].used) continue;
         View *p = &t->views[v->parent];
-        float x1 = p->x + v->link_x;
+        float x1 = view_draw_x(t, (u32)v->parent) + v->link_x;
         float y1 = p->y + v->link_y;
-        float x2 = v->x;
+        float x2 = view_draw_x(t, vi);
         float y2 = v->y;
         float mx = (x1 + x2) * 0.5f;
         float my = (y1 + y2) * 0.5f;

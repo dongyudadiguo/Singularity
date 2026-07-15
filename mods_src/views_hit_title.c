@@ -12,7 +12,8 @@ __declspec(dllexport) void run(void){
         for (int i=(int)t.count-1;i>=0;i--) {
             View *v=&t.views[i]; if(!v->used) continue;
             float width=title_text_width((u32)i,v);
-            if (mx>=v->x && mx<v->x+width && my>=v->y-title_h && my<v->y) { hit=i; break; }
+            float dx=view_draw_x(&t,(u32)i);
+            if (mx>=dx && mx<dx+width && my>=v->y-title_h && my<v->y) { hit=i; break; }
         }
     }
     push(&hit,4); cont();

@@ -17,7 +17,8 @@ __declspec(dllexport) void run(void){
             int row=(int)(rel/row_h);
             if (row<0 || (u32)row>=row_count) continue;
             float width=row_hit_width(v,row);
-            if (mx<v->x || mx>=v->x+width) continue;
+            float dx=view_draw_x(&t,(u32)i);
+            if (mx<dx || mx>=dx+width) continue;
             vhit=i; rhit=row; break;
         }
     }

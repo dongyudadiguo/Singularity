@@ -50,6 +50,27 @@ typedef struct {
     View views[VIEW_MAX];
 } Table;
 
+#define INDENT_X 22.0f
+/* Depth from parent chain (0 = root). Caps at 16. */
+static int view_depth(const Table *t, u32 vi) {
+    int d = 0;
+    int guard = 0;
+    int p = (int)vi;
+    while (p >= 0 && (u32)p < t->count && t->views[p].used && guard++ < 16) {
+        if (t->views[p].parent < 0) break;
+        d++;
+        p = t->views[p].parent;
+    }
+    return d;
+}
+static float view_indent_x(const Table *t, u32 vi) {
+    return (float)view_depth(t, vi) * INDENT_X;
+}
+/* Draw position for rows/titles = stored x + indent */
+static float view_draw_x(const Table *t, u32 vi) {
+    return t->views[vi].x + view_indent_x(t, vi);
+}
+
 /* forward decls for tag helpers defined below */
 static void key_display_name(const u8 *key, char *out, u32 outn);
 static int key_is_tag(const u8 *key);
@@ -187,11 +208,12 @@ static float header_total_width(u32 vi, const View *v, int dirty, int show_rec) 
 /* Which header button under (mx,my)? 0=none 1=commit 2=latch 3=vote
  * show_latch=0 for tag explorer nodes.
  */
-static int header_btn_hit(u32 vi, const View *v, float mx, float my, float title_h,
+static int header_btn_hit(const Table *t, u32 vi, const View *v, float mx, float my, float title_h,
                           int dirty, int show_rec, int show_latch) {
     if (my < v->y - title_h || my >= v->y) return 0;
     float tw = title_text_width(vi, v);
-    float x = v->x + tw + 10.0f;
+    float base = t ? view_draw_x(t, vi) : v->x;
+    float x = base + tw + 10.0f;
     float by = v->y - title_h + 4.0f;
     int latch = (v->pad0 & 1u) != 0;
     if (show_latch && dirty && !latch) {

@@ -20,7 +20,8 @@ __declspec(dllexport) void run(void){
             View *v = &t.views[i];
             if (!v->used) continue;
             float width = title_text_width((u32)i, v);
-            if (mx >= v->x && mx < v->x + width && my >= v->y - title_h && my < v->y) {
+            float dx = view_draw_x(&t, (u32)i);
+            if (mx >= dx && mx < dx + width && my >= v->y - title_h && my < v->y) {
                 vhit = i; rhit = -1; zone = 1; break;
             }
         }
@@ -33,7 +34,8 @@ __declspec(dllexport) void run(void){
                 int row = (int)(rel / row_h);
                 if (row < 0 || (u32)row > row_count) continue;
                 float width = row_hit_width(v, row);
-                if (mx < v->x || mx >= v->x + width) continue;
+                float dx = view_draw_x(&t, (u32)i);
+            if (mx < dx || mx >= dx + width) continue;
                 vhit = i; rhit = row; zone = 2; break;
             }
         }

