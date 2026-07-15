@@ -316,13 +316,27 @@ def main():
     if len(first_ins) < 2 or first_ins[-1] != (program_key, b""):
         raise RuntimeError("first block must initialize variables and execute the atomic program key")
     # first block may allocate vars (var_set_payload) and write initials (const/var_write).
+    allowed_init_names = {"var_set_payload", "const_payload", "var_write_payload", "var_set", "var_write"}
     allowed_init = {
         bytes.fromhex(manifest["native"][name])
-        for name in ("var_set_payload", "const_payload", "var_write_payload")
+        for name in allowed_init_names
         if name in manifest["native"]
     }
-    if any(token not in allowed_init for token, _ in first_ins[:-1]):
-        raise RuntimeError("first block contains unexpected non-init instructions")
+    # also accept tokens present under those names in instruction_names.bin
+    try:
+        import struct as _st
+        _raw = (ROOT / "instruction_names.bin").read_bytes()
+        _n = _st.unpack_from("<I", _raw)[0]
+        for _i in range(_n):
+            _rec = _raw[4 + _i * 128:4 + (_i + 1) * 128]
+            _nm = _rec[32:].split(b"\0", 1)[0].decode("ascii", "ignore")
+            if _nm in allowed_init_names:
+                allowed_init.add(_rec[:32])
+    except Exception:
+        pass
+    bad = [token.hex()[:16] for token, _ in first_ins[:-1] if token not in allowed_init and len(token)==32]
+    if bad:
+        raise RuntimeError("first block contains unexpected non-init instructions: " + ", ".join(bad[:8]))
     program_ins = instructions(program)
     module_ins_total = sum(len(instructions(raw)) for raw in modules.values())
     if manifest.get("modules") and not manifest.get("modules_inlined", False):

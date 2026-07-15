@@ -3,7 +3,7 @@ typedef unsigned u32;
 typedef u8 H[32];
 
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void *from(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) void cvm_exec(const H h);
@@ -25,7 +25,7 @@ static int mod_bool(const void *p) {
  */
 __declspec(dllexport) void run(void) {
     H h;
-    int ok = mod_bool(pop(4));
+    int ok = mod_bool(from(4));
     u8 *p = cvm_payload();
     if (cvm_payload_size() < 32) { cont(); return; }
     for (u32 i = 0; i < 32; i++) h[i] = p[i];

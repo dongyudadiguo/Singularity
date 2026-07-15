@@ -1,4 +1,8 @@
+#include <string.h>
 #include "views_common.h"
+typedef unsigned u32;
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 /* stack: f32 mx, my
  * payload: id[32] + f32 title_h + f32 row_h + u32 row_count
  * pushes: i32 view (-1 none), i32 row (-1 none), i32 zone (0 none, 1 title, 2 row)
@@ -7,7 +11,7 @@
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
     if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
-    float my = *(float*)pop(4), mx = *(float*)pop(4);
+    float my = *(float*)from(4), mx = *(float*)from(4);
     float title_h = 32.0f, row_h = 24.0f; u32 row_count = 256;
     if (an >= 4) title_h = *(float*)args;
     if (an >= 8) row_h = *(float*)(args + 4);
@@ -40,6 +44,6 @@ __declspec(dllexport) void run(void){
             }
         }
     }
-    push(&vhit, 4); push(&rhit, 4); push(&zone, 4);
+    memcpy(slot(4), &vhit, 4); memcpy(slot(4), &rhit, 4); memcpy(slot(4), &zone, 4);
     cont();
 }

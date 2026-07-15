@@ -7,7 +7,7 @@ typedef unsigned u32;
 typedef u8 H[32];
 
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void *from(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 id_len, u32 *size);
@@ -81,7 +81,7 @@ static int replace_payload(u32 off, const u8 *np, u32 nn) {
 }
 
 __declspec(dllexport) void run(void) {
-    u32 off = *(u32 *)pop(4);
+    u32 off = *(u32 *)from(4);
     u8 *vid = cvm_payload();
     u32 vid_len = cvm_payload_size();
     if (!vid_len) { cont(); return; }

@@ -24,12 +24,12 @@ static void load_index(void) {
 }
 
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32);
-extern __declspec(dllimport) void push(const void *, u32);
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 
 __declspec(dllexport) void run(void) {
     H token;
-    memcpy(token, pop(32), 32);
+    memcpy(token, from(32), 32);
     char out[96];
     memset(out, 0, sizeof(out));
     int nz = 0;
@@ -45,6 +45,6 @@ __declspec(dllexport) void run(void) {
         if (!out[0])
             snprintf(out, sizeof(out), "%02x%02x%02x%02x", token[0], token[1], token[2], token[3]);
     }
-    push(out, sizeof(out));
+    memcpy(slot(sizeof(out)), out, sizeof(out));
     cont();
 }

@@ -1,10 +1,12 @@
 #include "views_common.h"
+typedef unsigned u32;
+extern __declspec(dllimport) void *from(u32);
 extern __declspec(dllimport) void cvm_flush_key(const H key);
 
 /* stack: u32 view_index (0xffffffff = active) */
 __declspec(dllexport) void run(void) {
     const u8 *id; u32 id_len;
-    u32 vi = *(u32*)pop(4);
+    u32 vi = *(u32*)from(4);
     if (!payload_id(&id, &id_len, 0, 0)) { cont(); return; }
     Table *t = load_table(id, id_len);
     if (!t) { cont(); return; }

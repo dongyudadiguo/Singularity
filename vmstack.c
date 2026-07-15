@@ -6,12 +6,14 @@ typedef unsigned char u8;
 typedef unsigned u32;
 
 /*
- * Stack model (mark / back):
- *   mark()  — push current sp as a return point
- *   back()  — restore sp to last mark (pop the frame)
- *   push/pop remain for byte payloads between marks (compat)
+ * Stack = linear byte buffer + mark frames.
  *
- * Frame stack is independent of data stack so nested scopes work.
+ *   mark()       save sp (return point)
+ *   back()       restore sp to last mark
+ *   slot(n)      grow by n, return writable ptr at old top  (was push region)
+ *   from(n)      shrink by n, return ptr to removed bytes   (was pop)
+ *
+ * No push/pop exports.
  */
 
 #define STACK_CAP (1u << 20)
@@ -24,19 +26,17 @@ static u32 mark_sp;
 
 static void ensure_stack(void) {
     if (!stk) {
-        stk = (u8*)malloc(STACK_CAP);
+        stk = (u8 *)malloc(STACK_CAP);
         sp = 0;
         mark_sp = 0;
     }
 }
 
-/* Record return point = current sp. */
 __declspec(dllexport) void mark(void) {
     ensure_stack();
     if (mark_sp < MARK_CAP) marks[mark_sp++] = sp;
 }
 
-/* Restore sp to last mark (discard data above it). */
 __declspec(dllexport) void back(void) {
     ensure_stack();
     if (!mark_sp) { sp = 0; return; }
@@ -44,9 +44,17 @@ __declspec(dllexport) void back(void) {
     if (sp > STACK_CAP) sp = 0;
 }
 
-/* Optional: back without removing mark (peek restore) — not exported. */
+__declspec(dllexport) void *slot(u32 size) {
+    void *p;
+    ensure_stack();
+    if (size > STACK_CAP) size = STACK_CAP;
+    if (sp + size > STACK_CAP) sp = 0;
+    p = stk + sp;
+    sp += size;
+    return p;
+}
 
-__declspec(dllexport) void *pop(u32 size) {
+__declspec(dllexport) void *from(u32 size) {
     ensure_stack();
     if (size > sp) {
         sp = 0;
@@ -54,14 +62,6 @@ __declspec(dllexport) void *pop(u32 size) {
     }
     sp -= size;
     return stk + sp;
-}
-
-__declspec(dllexport) void push(const void *p, u32 size) {
-    ensure_stack();
-    if (size > STACK_CAP) size = STACK_CAP;
-    if (sp + size > STACK_CAP) sp = 0;
-    if (p && size) memcpy(stk + sp, p, size);
-    sp += size;
 }
 
 __declspec(dllexport) u32 cvm_stack_size(void) {

@@ -1,6 +1,7 @@
+#include <string.h>
 #include "block_layout.h"
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void push(const void*, u32);
+extern __declspec(dllimport) void *slot(u32);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
 extern __declspec(dllimport) u32 cvm_cached_len(void);
 __declspec(dllexport) void run(void){
@@ -10,6 +11,6 @@ __declspec(dllexport) void run(void){
         r++;
         if (r > 256) break;
     }
-    push(&r, 4);
+    memcpy(slot(4), &r, 4);
     cont();
 }

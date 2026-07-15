@@ -1,5 +1,9 @@
+#include <string.h>
 #include "views_common.h"
 #include <stdlib.h>
+typedef unsigned u32;
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 extern __declspec(dllimport) int cvm_key_dirty(const H key);
 extern __declspec(dllimport) void cvm_flush_key(const H key);
 extern __declspec(dllimport) void cvm_vote(const H parent, const H child);
@@ -64,13 +68,13 @@ static int toggle_cond_flag(View *parent, u32 row, int which) {
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
     if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
-    float my=*(float*)pop(4), mx=*(float*)pop(4);
+    float my=*(float*)from(4), mx=*(float*)from(4);
     float title_h=32.f, row_h=24.f; u32 row_count=256;
     if (an>=4) title_h=*(float*)args;
     if (an>=8) row_h=*(float*)(args+4);
     if (an>=12) row_count=*(u32*)(args+8);
     u32 handled=0;
-    Table *tp=load_table(id, id_len); if(!tp){ push(&handled,4); cont(); return; }
+    Table *tp=load_table(id, id_len); if(!tp){ memcpy(slot(4), &handled, 4); cont(); return; }
     Table t=*tp;
 
     /* Mid-link cond buttons */
@@ -98,14 +102,14 @@ __declspec(dllexport) void run(void){
             if (mx >= bx && mx < bx + 28.0f && my >= by && my < by + 18.0f) {
                 toggle_cond_flag(p, prow, 1);
                 handled = 1; store_table(id, id_len, &t);
-                push(&handled,4); cont(); return;
+                memcpy(slot(4), &handled, 4); cont(); return;
             }
             bx += 32.0f;
         }
         if (mx >= bx && mx < bx + 28.0f && my >= by && my < by + 18.0f) {
             toggle_cond_flag(p, prow, 2);
             handled = 1; store_table(id, id_len, &t);
-            push(&handled,4); cont(); return;
+            memcpy(slot(4), &handled, 4); cont(); return;
         }
     }
 
@@ -129,7 +133,7 @@ __declspec(dllexport) void run(void){
         }
         handled = 1;
         store_table(id, id_len, &t);
-        push(&handled,4); cont(); return;
+        memcpy(slot(4), &handled, 4); cont(); return;
     }
 
     /* Title drag */
@@ -146,7 +150,7 @@ __declspec(dllexport) void run(void){
             t.dragging=i;
             handled=1;
             store_table(id, id_len, &t);
-            push(&handled,4); cont(); return;
+            memcpy(slot(4), &handled, 4); cont(); return;
         }
     }
 
@@ -164,12 +168,12 @@ __declspec(dllexport) void run(void){
         t.dragging=-1;
         handled=1;
         store_table(id, id_len, &t);
-        push(&handled,4); cont(); return;
+        memcpy(slot(4), &handled, 4); cont(); return;
     }
 
     if (t.dragging != -1) {
         t.dragging = -1;
         store_table(id, id_len, &t);
     }
-    push(&handled,4); cont();
+    memcpy(slot(4), &handled, 4); cont();
 }

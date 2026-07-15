@@ -1,7 +1,8 @@
+#include <string.h>
 typedef unsigned char u8;
 typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void push(const void *p, u32 size);
+extern __declspec(dllimport) void *slot(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 #include <windows.h>
@@ -20,6 +21,6 @@ __declspec(dllexport) void run(void) {
     } else if (bit == 4u) {
         u8 d = down(VK_MBUTTON); v = (d && !prev_m) ? 1u : 0u; prev_m = d;
     }
-    push(&v, 4);
+    memcpy(slot(4), &v, 4);
     cont();
 }

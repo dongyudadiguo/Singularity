@@ -43,12 +43,12 @@ static int match(const char *name, const char *query) {
 }
 
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32);
-extern __declspec(dllimport) void push(const void *, u32);
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 
 /* stack: text buffer (256 from var_read of input) -> token[32] (zero if no match) */
 __declspec(dllexport) void run(void) {
-    char *q = (char *)pop(256);
+    char *q = (char *)from(256);
     H out;
     memset(out, 0, 32);
     load_index();
@@ -60,6 +60,6 @@ __declspec(dllexport) void run(void) {
             }
         }
     }
-    push(out, 32);
+    memcpy(slot(32), out, 32);
     cont();
 }

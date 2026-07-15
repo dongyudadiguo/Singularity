@@ -1,17 +1,21 @@
+#include <string.h>
 #include "views_common.h"
+typedef unsigned u32;
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 /* payload: id[32]
  * stack: key[32], f32 x, f32 y, i32 parent, f32 link_x, f32 link_y
  * Opens or focuses key; starts drag on it. Pushes u32 index or 0xffffffff.
  */
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; if (!payload_id(&id, &id_len, 0, 0)) { cont(); return; }
-    float ly = *(float*)pop(4), lx = *(float*)pop(4);
-    int parent = *(int*)pop(4);
-    float y = *(float*)pop(4), x = *(float*)pop(4);
-    u8 key[32]; memcpy(key, pop(32), 32);
+    float ly = *(float*)from(4), lx = *(float*)from(4);
+    int parent = *(int*)from(4);
+    float y = *(float*)from(4), x = *(float*)from(4);
+    u8 key[32]; memcpy(key, from(32), 32);
     u32 out = 0xffffffffu;
     Table *tp = load_or_empty(id, id_len, 1);
-    if (!tp || zero_key(key)) { push(&out, 4); cont(); return; }
+    if (!tp || zero_key(key)) { memcpy(slot(4), &out, 4); cont(); return; }
     Table t = *tp;
     int found = -1;
     for (u32 i = 0; i < t.count; i++)
@@ -30,6 +34,6 @@ __declspec(dllexport) void run(void){
         t.active = i; t.dragging = (int)i; out = i;
     }
     store_table(id, id_len, &t);
-    push(&out, 4);
+    memcpy(slot(4), &out, 4);
     cont();
 }

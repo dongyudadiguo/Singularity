@@ -3,8 +3,8 @@
 #include <string.h>
 typedef unsigned char u8; typedef unsigned u32; typedef u8 H[32];
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32);
-extern __declspec(dllimport) void push(const void*, u32);
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
 extern __declspec(dllimport) u32 cvm_cached_len(void);
 
@@ -39,7 +39,7 @@ static int is_hash_carrier(const u8 *tok){
 }
 /* stack: u32 row -> key[32] open target from CURRENT cached block */
 __declspec(dllexport) void run(void){
-    u32 row = *(u32*)pop(4);
+    u32 row = *(u32*)from(4);
     u8 *b = cvm_cached_base(); u32 nlen = cvm_cached_len();
     u32 o = 0;
     u8 key[32]; memset(key, 0, 32);
@@ -54,6 +54,6 @@ __declspec(dllexport) void run(void){
         if (tlen == 32 && is_hash_carrier(tok) && pn >= 32 && !bl_zero32(pay))
             memcpy(key, pay, 32);
     }
-    push(key, 32);
+    memcpy(slot(32), key, 32);
     cont();
 }

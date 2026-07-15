@@ -2,7 +2,7 @@
 typedef unsigned char u8;
 typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void push(const void *p, u32 size);
+extern __declspec(dllimport) void *slot(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) u8 *cvm_var_get(const u8*, u32, u32*);
@@ -23,6 +23,6 @@ __declspec(dllexport) void run(void) {
             if (z && dxgfx_measure_text(size, (const char *)s, z, out)) w = out[0];
         }
     }
-    push(&w, 4);
+    memcpy(slot(4), &w, 4);
     cont();
 }

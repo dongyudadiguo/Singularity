@@ -1,8 +1,9 @@
+#include <string.h>
 typedef unsigned char u8;
 typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32);
-extern __declspec(dllimport) void push(const void *p, u32 size);
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 #include "../dxgfx.h"
@@ -16,7 +17,7 @@ __declspec(dllexport) void run(void) {
     if (cvm_payload_size() >= 8) {
         float size = *(float *)p;
         u32 count = *(u32 *)(p + 4);
-        char *s = (char *)pop(count ? count : 1);
+        char *s = (char *)from(count ? count : 1);
         u32 z = 0;
         while (z < count && s[z]) z++;
         if (z) {
@@ -24,6 +25,6 @@ __declspec(dllexport) void run(void) {
             if (dxgfx_measure_text(size, s, z, out)) w = out[0];
         }
     }
-    push(&w, 4);
+    memcpy(slot(4), &w, 4);
     cont();
 }

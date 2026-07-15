@@ -5,8 +5,8 @@ typedef unsigned u32;
 typedef u8 H[32];
 
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32 size);
-extern __declspec(dllimport) void push(const void *p, u32 size);
+extern __declspec(dllimport) void *from(u32 size);
+extern __declspec(dllimport) void *slot(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 id_len, u32 *size);
@@ -340,16 +340,16 @@ __declspec(dllexport) void run(void) {
             tp = load(id);
             if (!tp) { cont(); return; }
         } else {
-            if (op == 1) { u32 z = 0; push(&z, 4); }
-            else if (op == 2) { u32 z = 0; push(&z, 4); }
-            else if (op == 14) { u32 z = 0xffffffffu; push(&z, 4); }
-            else if (op == 15) { int z = -1; (void)pop(8); push(&z, 4); }
-            else if (op == 16) { int z = -1; (void)pop(8); push(&z, 4); push(&z, 4); }
-            else if (op == 19) { int z = -1; push(&z, 4); }
-            else if (op == 21) { u32 z = 0; push(&z, 4); }
-            else if (op == 22) { u8 z[32]; memset(z, 0, 32); push(z, 32); }
-            else if (op == 29 || op == 30) { u32 z = 0; (void)pop(8); push(&z, 4); }
-            else if (op == 32) { float z = 0.0f; push(&z, 4); push(&z, 4); }
+            if (op == 1) { u32 z = 0; memcpy(slot(4), &z, 4); }
+            else if (op == 2) { u32 z = 0; memcpy(slot(4), &z, 4); }
+            else if (op == 14) { u32 z = 0xffffffffu; memcpy(slot(4), &z, 4); }
+            else if (op == 15) { int z = -1; (void)from(8); memcpy(slot(4), &z, 4); }
+            else if (op == 16) { int z = -1; (void)from(8); memcpy(slot(4), &z, 4); memcpy(slot(4), &z, 4); }
+            else if (op == 19) { int z = -1; memcpy(slot(4), &z, 4); }
+            else if (op == 21) { u32 z = 0; memcpy(slot(4), &z, 4); }
+            else if (op == 22) { u8 z[32]; memset(z, 0, 32); memcpy(slot(32), z, 32); }
+            else if (op == 29 || op == 30) { u32 z = 0; (void)from(8); memcpy(slot(4), &z, 4); }
+            else if (op == 32) { float z = 0.0f; memcpy(slot(4), &z, 4); memcpy(slot(4), &z, 4); }
             cont();
             return;
         }
@@ -371,9 +371,9 @@ __declspec(dllexport) void run(void) {
         t.views[0].y = *(float *)(args + 36);
         store(id, &t);
     } else if (op == 1) {
-        push(&t.count, 4);
+        memcpy(slot(4), &t.count, 4);
     } else if (op == 2) {
-        push(&t.active, 4);
+        memcpy(slot(4), &t.active, 4);
     } else if (op == 3) {
         if (an >= 4) {
             u32 idx = *(u32 *)args;
@@ -388,7 +388,7 @@ __declspec(dllexport) void run(void) {
                 x = t.views[idx].x; y = t.views[idx].y;
             }
         }
-        push(&x, 4); push(&y, 4);
+        memcpy(slot(4), &x, 4); memcpy(slot(4), &y, 4);
     } else if (op == 5) {
         if (an >= 12) {
             u32 idx = *(u32 *)args;
@@ -404,14 +404,14 @@ __declspec(dllexport) void run(void) {
             u32 idx = *(u32 *)args;
             if (idx < t.count && t.views[idx].used) memcpy(key, t.views[idx].key, 32);
         }
-        push(key, 32);
+        memcpy(slot(32), key, 32);
     } else if (op == 7) {
         int parent = -1;
         if (an >= 4) {
             u32 idx = *(u32 *)args;
             if (idx < t.count && t.views[idx].used) parent = t.views[idx].parent;
         }
-        push(&parent, 4);
+        memcpy(slot(4), &parent, 4);
     } else if (op == 8) {
         float lx = 0.0f, ly = 0.0f; int linked = 0;
         if (an >= 4) {
@@ -421,14 +421,14 @@ __declspec(dllexport) void run(void) {
                 linked = t.views[idx].linked;
             }
         }
-        push(&lx, 4); push(&ly, 4); push(&linked, 4);
+        memcpy(slot(4), &lx, 4); memcpy(slot(4), &ly, 4); memcpy(slot(4), &linked, 4);
     } else if (op == 9) {
         u32 cur = 0;
         if (an >= 4) {
             u32 idx = *(u32 *)args;
             if (idx < t.count && t.views[idx].used) cur = t.views[idx].cursor;
         }
-        push(&cur, 4);
+        memcpy(slot(4), &cur, 4);
     } else if (op == 10) {
         if (an >= 8) {
             u32 idx = *(u32 *)args;
@@ -484,11 +484,11 @@ __declspec(dllexport) void run(void) {
             }
         }
         store(id, &t);
-        push(&out, 4);
+        memcpy(slot(4), &out, 4);
     } else if (op == 15) {
         /* hit title bar: text-width */
-        float my = *(float *)pop(4);
-        float mx = *(float *)pop(4);
+        float my = *(float *)from(4);
+        float mx = *(float *)from(4);
         float title_h = 32.0f;
         if (an >= 4) title_h = *(float *)args;
         int hit = -1;
@@ -500,11 +500,11 @@ __declspec(dllexport) void run(void) {
                 hit = i; break;
             }
         }
-        push(&hit, 4);
+        memcpy(slot(4), &hit, 4);
     } else if (op == 16) {
         /* hit row: text-width per row */
-        float my = *(float *)pop(4);
-        float mx = *(float *)pop(4);
+        float my = *(float *)from(4);
+        float mx = *(float *)from(4);
         float row_h = 24.0f; u32 row_count = 64;
         if (an >= 4) row_h = *(float *)args;
         if (an >= 12) row_count = *(u32 *)(args + 8);
@@ -521,7 +521,7 @@ __declspec(dllexport) void run(void) {
             if (mx < v->x || mx >= v->x + width) continue;
             vhit = i; rhit = row; break;
         }
-        push(&vhit, 4); push(&rhit, 4);
+        memcpy(slot(4), &vhit, 4); memcpy(slot(4), &rhit, 4);
     } else if (op == 17) {
         if (an >= 12) {
             u32 idx = *(u32 *)args;
@@ -545,7 +545,7 @@ __declspec(dllexport) void run(void) {
             store(id, &t);
         }
     } else if (op == 19) {
-        push(&t.dragging, 4);
+        memcpy(slot(4), &t.dragging, 4);
     } else if (op == 20) {
         if (an >= 4 && t.active < t.count && t.views[t.active].used) {
             t.views[t.active].cursor = *(u32 *)args;
@@ -554,11 +554,11 @@ __declspec(dllexport) void run(void) {
     } else if (op == 21) {
         u32 cur = 0;
         if (t.active < t.count && t.views[t.active].used) cur = t.views[t.active].cursor;
-        push(&cur, 4);
+        memcpy(slot(4), &cur, 4);
     } else if (op == 22) {
         u8 key[32]; memset(key, 0, 32);
         if (t.active < t.count && t.views[t.active].used) memcpy(key, t.views[t.active].key, 32);
-        push(key, 32);
+        memcpy(slot(32), key, 32);
     } else if (op == 23) {
         /* cursor_add: args i32 delta on active, clamped to block rows + end */
         if (an >= 4 && t.active < t.count && t.views[t.active].used) {
@@ -578,8 +578,8 @@ __declspec(dllexport) void run(void) {
         }
     } else if (op == 29) {
         /* pointer_lmb: text-width title / row hit */
-        float my = *(float *)pop(4);
-        float mx = *(float *)pop(4);
+        float my = *(float *)from(4);
+        float mx = *(float *)from(4);
         float title_h = 32.0f, row_h = 24.0f;
         u32 row_count = 256;
         if (an >= 4) title_h = *(float *)args;
@@ -615,11 +615,11 @@ __declspec(dllexport) void run(void) {
             }
         }
         store(id, &t);
-        push(&handled, 4);
+        memcpy(slot(4), &handled, 4);
     } else if (op == 30) {
         /* pointer_rmb: title drag / row open with text-width hit */
-        float my = *(float *)pop(4);
-        float mx = *(float *)pop(4);
+        float my = *(float *)from(4);
+        float mx = *(float *)from(4);
         float title_h = 32.0f, row_h = 24.0f;
         u32 row_count = 256;
         if (an >= 4) title_h = *(float *)args;
@@ -637,7 +637,7 @@ __declspec(dllexport) void run(void) {
                 t.dragging = i;
                 handled = 1;
                 store(id, &t);
-                push(&handled, 4);
+                memcpy(slot(4), &handled, 4);
                 cont();
                 return;
             }
@@ -706,7 +706,7 @@ __declspec(dllexport) void run(void) {
             break;
         }
         store(id, &t);
-        push(&handled, 4);
+        memcpy(slot(4), &handled, 4);
     }
 
     if (op == 32) {
@@ -715,10 +715,10 @@ __declspec(dllexport) void run(void) {
             x = t.views[t.dragging].x;
             y = t.views[t.dragging].y;
         }
-        push(&x, 4); push(&y, 4);
+        memcpy(slot(4), &x, 4); memcpy(slot(4), &y, 4);
     } else if (op == 33) {
-        float y = *(float *)pop(4);
-        float x = *(float *)pop(4);
+        float y = *(float *)from(4);
+        float x = *(float *)from(4);
         if (t.dragging >= 0 && (u32)t.dragging < t.count && t.views[t.dragging].used) {
             t.views[t.dragging].x = x;
             t.views[t.dragging].y = y;

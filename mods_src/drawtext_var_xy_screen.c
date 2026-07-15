@@ -1,14 +1,14 @@
 typedef unsigned char u8; typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32);
+extern __declspec(dllimport) void *from(u32);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) u8 *cvm_var_get(const u8*, u32, u32*);
 #include "../dxgfx.h"
 /* stack: f32 x, f32 y; payload: id[32], u32 ARGB, f32 size */
 __declspec(dllexport) void run(void) {
-    float y = *(float*)pop(4);
-    float x = *(float*)pop(4);
+    float y = *(float*)from(4);
+    float x = *(float*)from(4);
     u8 *p = cvm_payload();
     if (cvm_payload_size() >= 40) {
         u32 n = 0;

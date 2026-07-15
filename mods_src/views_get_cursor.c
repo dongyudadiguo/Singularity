@@ -1,4 +1,7 @@
+#include <string.h>
 #include "views_common.h"
+typedef unsigned u32;
+extern __declspec(dllimport) void *slot(u32);
 /* args: u32 index -> u32 */
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
@@ -9,5 +12,5 @@ __declspec(dllexport) void run(void){
         u32 idx=*(u32*)args;
         if (idx < tp->count && tp->views[idx].used) cur = tp->views[idx].cursor;
     }
-    push(&cur,4); cont();
+    memcpy(slot(4), &cur, 4); cont();
 }

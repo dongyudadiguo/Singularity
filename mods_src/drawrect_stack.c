@@ -1,16 +1,16 @@
 typedef unsigned char u8;
 typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void *from(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 #include "../dxgfx.h"
 /* stack: f32 x y w h ; payload: u32 ARGB, f32 stroke, u32 fill */
 __declspec(dllexport) void run(void) {
-    float h = *(float*)pop(4);
-    float w = *(float*)pop(4);
-    float y = *(float*)pop(4);
-    float x = *(float*)pop(4);
+    float h = *(float*)from(4);
+    float w = *(float*)from(4);
+    float y = *(float*)from(4);
+    float x = *(float*)from(4);
     u32 argb = 0xff34414d;
     float stroke = 1.0f;
     int fill = 1;

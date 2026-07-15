@@ -6,8 +6,8 @@ typedef unsigned u32;
 typedef u8 H[32];
 
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32 size);
-extern __declspec(dllimport) void push(const void *p, u32 size);
+extern __declspec(dllimport) void *from(u32 size);
+extern __declspec(dllimport) void *slot(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) u8 *cvm_var_get(const u8 *id, u32 id_len, u32 *size);
@@ -85,16 +85,16 @@ static int is_hash_carrier(const u8 *tok) {
  */
 __declspec(dllexport) void run(void) {
     u32 out = 0xffffffffu;
-    float y = *(float*)pop(4);
-    float x = *(float*)pop(4);
-    u32 row = *(u32*)pop(4);
-    u32 vi = *(u32*)pop(4);
-    if (cvm_payload_size() < 32) { push(&out,4); cont(); return; }
+    float y = *(float*)from(4);
+    float x = *(float*)from(4);
+    u32 row = *(u32*)from(4);
+    u32 vi = *(u32*)from(4);
+    if (cvm_payload_size() < 32) { memcpy(slot(4), &out, 4); cont(); return; }
     H id; memcpy(id, cvm_payload(), 32);
     u32 size=0; u8 *raw=cvm_var_get(id, 32, &size);
-    if(!raw || size < sizeof(Table)) { push(&out,4); cont(); return; }
+    if(!raw || size < sizeof(Table)) { memcpy(slot(4), &out, 4); cont(); return; }
     Table t; memcpy(&t, raw, sizeof(t));
-    if (vi >= t.count || !t.views[vi].used) { push(&out,4); cont(); return; }
+    if (vi >= t.count || !t.views[vi].used) { memcpy(slot(4), &out, 4); cont(); return; }
 
     H h;
     cvm_resolve_payload_hash(t.views[vi].key, h);
@@ -106,7 +106,7 @@ __declspec(dllexport) void run(void) {
     }
     u8 key[32]; memset(key,0,32);
     if (o+32<=n && !zero32(b+o)) memcpy(key,b+o,32);
-    if (zero32(key)) { push(&out,4); cont(); return; }
+    if (zero32(key)) { memcpy(slot(4), &out, 4); cont(); return; }
     if (o+36<=n) {
         u32 pn=*(u32*)(b+o+32);
         if (pn==32 && o+68<=n && is_hash_carrier(key)) {
@@ -120,7 +120,7 @@ __declspec(dllexport) void run(void) {
         if (t.views[i].used && same_key(t.views[i].key,key)) {
             t.active=i; t.dragging=(int)i;
             cvm_var_write(id, 32, (u8*)&t, sizeof(t));
-            out=i; push(&out,4); cont(); return;
+            out=i; memcpy(slot(4), &out, 4); cont(); return;
         }
     }
     if (t.count < VIEW_MAX) {
@@ -138,6 +138,6 @@ __declspec(dllexport) void run(void) {
         out=i;
         cvm_var_write(id, 32, (u8*)&t, sizeof(t));
     }
-    push(&out,4);
+    memcpy(slot(4), &out, 4);
     cont();
 }

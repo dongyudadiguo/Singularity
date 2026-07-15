@@ -1,8 +1,8 @@
 #include <string.h>
 typedef unsigned char u8; typedef unsigned u32;
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32);
-extern __declspec(dllimport) void push(const void*, u32);
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 /* payload: dst_n[u32] + src_n[u32]
@@ -16,8 +16,8 @@ __declspec(dllexport) void run(void){
     u32 src_n = (pn >= 8) ? *(u32*)(p + 4) : 256;
     if (!dst_n) dst_n = 1;
     if (!src_n) src_n = 1;
-    u8 *src = (u8*)pop(src_n);
-    u8 *dst = (u8*)pop(dst_n);
+    u8 *src = (u8*)from(src_n);
+    u8 *dst = (u8*)from(dst_n);
     u32 a = 0; while (a < dst_n && dst[a]) a++;
     u32 z = 0; while (z < src_n && src[z]) z++;
     if (dst_n) {
@@ -27,6 +27,6 @@ __declspec(dllexport) void run(void){
         if (z) memcpy(dst + a, src, z);
         dst[a + z] = 0;
     }
-    push(dst, dst_n);
+    memcpy(slot(dst_n), dst, dst_n);
     cont();
 }

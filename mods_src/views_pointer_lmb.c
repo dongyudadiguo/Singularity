@@ -1,11 +1,15 @@
+#include <string.h>
 #include "views_common.h"
+typedef unsigned u32;
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 /* stack mx,my; args optional title_h,pad,row_h,row_count
  * title -> active + dragging; row -> select (no drag).
  */
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
     if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
-    float my=*(float*)pop(4), mx=*(float*)pop(4);
+    float my=*(float*)from(4), mx=*(float*)from(4);
     float title_h=32.0f, row_h=24.0f; u32 row_count=256;
     if (an>=4) title_h=*(float*)args;
     if (an>=12) row_h=*(float*)(args+8);
@@ -14,7 +18,7 @@ __declspec(dllexport) void run(void){
     else if (an>=12) row_count=*(u32*)(args+8);
     int handled=0;
     Table *tp=load_or_empty(id, id_len, 0);
-    if (!tp) { push(&handled,4); cont(); return; }
+    if (!tp) { memcpy(slot(4), &handled, 4); cont(); return; }
     Table t=*tp;
     for (int i=(int)t.count-1;i>=0;i--) {
         View *v=&t.views[i]; if(!v->used) continue;
@@ -34,5 +38,5 @@ __declspec(dllexport) void run(void){
             t.active=(u32)i; t.views[i].cursor=(u32)row; t.dragging=-1; handled=1; break;
         }
     }
-    store_table(id, id_len, &t); push(&handled,4); cont();
+    store_table(id, id_len, &t); memcpy(slot(4), &handled, 4); cont();
 }

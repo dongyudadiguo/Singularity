@@ -1,6 +1,6 @@
 #include "block_layout.h"
 extern __declspec(dllimport) void cont(void);
-extern __declspec(dllimport) void *pop(u32 size);
+extern __declspec(dllimport) void *from(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
 extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) u8 *cvm_cached_base(void);
@@ -9,7 +9,7 @@ extern __declspec(dllimport) void cvm_cached_set_len(u32 n);
 #define MAX_BLOCK (1u << 20)
 /* stack: off[u32]; new payload = cvm_payload() */
 __declspec(dllexport) void run(void) {
-    u32 off = *(u32*)pop(4);
+    u32 off = *(u32*)from(4);
     u8 *np = cvm_payload();
     u32 nn = cvm_payload_size();
     u8 *b = cvm_cached_base();

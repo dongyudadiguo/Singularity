@@ -1,4 +1,8 @@
+#include <string.h>
 #include "views_common.h"
+typedef unsigned u32;
+extern __declspec(dllimport) void *from(u32);
+extern __declspec(dllimport) void *slot(u32);
 /* legacy alias of apply_rmb: stack mx,my; payload id+title_h,row_h,row_count
  * title -> close/remove that view (RMB closes node)
  * row   -> open target key at mouse and start drag (RMB drag-out open)
@@ -7,13 +11,13 @@
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
     if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
-    float my=*(float*)pop(4), mx=*(float*)pop(4);
+    float my=*(float*)from(4), mx=*(float*)from(4);
     float title_h=32.f, row_h=24.f; u32 row_count=256;
     if (an>=4) title_h=*(float*)args;
     if (an>=8) row_h=*(float*)(args+4);
     if (an>=12) row_count=*(u32*)(args+8);
     u32 handled=0;
-    Table *tp=load_or_empty(id, id_len, 0); if(!tp){ push(&handled,4); cont(); return; }
+    Table *tp=load_or_empty(id, id_len, 0); if(!tp){ memcpy(slot(4), &handled, 4); cont(); return; }
     Table t=*tp;
 
     /* Title hit: close the node (do not drag title on RMB). */
@@ -51,7 +55,7 @@ __declspec(dllexport) void run(void){
             }
             handled=1;
             store_table(id, id_len, &t);
-            push(&handled,4); cont(); return;
+            memcpy(slot(4), &handled, 4); cont(); return;
         }
     }
 
@@ -82,5 +86,5 @@ __declspec(dllexport) void run(void){
         }
         handled=1; break;
     }
-    store_table(id, id_len, &t); push(&handled,4); cont();
+    store_table(id, id_len, &t); memcpy(slot(4), &handled, 4); cont();
 }
