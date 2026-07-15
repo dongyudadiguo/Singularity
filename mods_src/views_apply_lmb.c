@@ -1,4 +1,6 @@
 #include <string.h>
+extern __declspec(dllimport) void cvm_hand_toggle(unsigned uid);
+#include <string.h>
 #include "views_common.h"
 #include <stdlib.h>
 typedef unsigned u32;
@@ -43,28 +45,6 @@ static void vote_node_tokens(const View *v) {
     }
 }
 
-static int toggle_cond_flag(View *parent, u32 row, int which) {
-    if (key_is_tag(parent->key)) return 0;
-    H h; cvm_resolve_payload_hash(parent->key, h);
-    u8 *b = cvm_cached_base();
-    u32 n = cvm_cached_len();
-    u32 o = block_row_offset(parent, row);
-    if (!bl_ok(b, n, o) || bl_is_end(b + o)) return 0;
-    u32 tlen = bl_tlen(b + o);
-    if (tlen != 32) return 0;
-    const char *nm = token_name(bl_token_c(b + o));
-    u32 pn = bl_plen(b + o);
-    if (!nm || strcmp(nm, "cond_token_payload") || pn < 38) return 0;
-    u8 *pay = bl_payload(b + o);
-    if (which == 1) {
-        pay[36] = pay[36] ? 0 : 1;
-    } else if (which == 2) {
-        pay[37] = pay[37] ? 0 : 1;
-        if (pay[37]) pay[36] = 0;
-    }
-    return 1;
-}
-
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
     if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
@@ -77,39 +57,31 @@ __declspec(dllexport) void run(void){
     Table *tp=load_table(id, id_len); if(!tp){ memcpy(slot(4), &handled, 4); cont(); return; }
     Table t=*tp;
 
-    /* Mid-link cond buttons */
+        /* Mid-link: token_run_by_hand arm toggle only */
     for (u32 vi = 0; vi < t.count; vi++) {
         View *v = &t.views[vi];
         if (!v->used || !v->linked || v->parent < 0) continue;
         if ((u32)v->parent >= t.count || !t.views[v->parent].used) continue;
         View *p = &t.views[v->parent];
+        if (key_is_tag(p->key) || key_is_tag(v->key)) continue;
         float x1 = view_draw_x(&t, (u32)v->parent) + v->link_x, y1 = p->y + v->link_y;
         float x2 = view_draw_x(&t, vi), y2 = v->y;
         float midx = (x1 + x2) * 0.5f, midy = (y1 + y2) * 0.5f;
         u32 prow = (u32)row_from_link_y(v->link_y, row_h);
-        if (key_is_tag(p->key)) continue;
         const u8 *instr = row_instr(p, prow, 0);
-        if (!instr) continue;
-        u32 tlen = bl_tlen(instr);
-        if (tlen != 32) continue;
+        if (!instr || bl_tlen(instr) != 32) continue;
         const char *nm = token_name(bl_token_c(instr));
         u32 pn = bl_plen(instr);
-        if (!nm || strcmp(nm, "cond_token_payload") || pn < 38) continue;
-        u8 once = 0, contf = 0;
-        cond_token_parse(bl_payload_c(instr), pn, 0, 0, &once, &contf);
-        float bx = midx - 28.0f, by = midy - 9.0f;
-        if (!contf) {
-            if (mx >= bx && mx < bx + 28.0f && my >= by && my < by + 18.0f) {
-                toggle_cond_flag(p, prow, 1);
-                handled = 1; store_table(id, id_len, &t);
-                memcpy(slot(4), &handled, 4); cont(); return;
-            }
-            bx += 32.0f;
-        }
-        if (mx >= bx && mx < bx + 28.0f && my >= by && my < by + 18.0f) {
-            toggle_cond_flag(p, prow, 2);
-            handled = 1; store_table(id, id_len, &t);
-            memcpy(slot(4), &handled, 4); cont(); return;
+        if (!nm || strcmp(nm, "token_run_by_hand") || pn < 36) continue;
+        u32 uid = *(u32*)bl_payload_c(instr);
+        float bw = 36.0f, bh = 18.0f;
+        float bx = midx - bw * 0.5f, by = midy - bh * 0.5f;
+        if (mx >= bx && mx < bx + bw && my >= by && my < by + bh) {
+            cvm_hand_toggle(uid);
+            handled = 1;
+            store_table(id, id_len, &t);
+            memcpy(slot(4), &handled, 4);
+            cont(); return;
         }
     }
 

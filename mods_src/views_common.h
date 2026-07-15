@@ -154,6 +154,7 @@ static int is_hash_carrier(const u8 *tok) {
     const char *nm = token_name(tok);
     if (!nm || !nm[0] || nm[0] == '<') return 0;
     if (!strcmp(nm, "cond_token_payload")) return 1;
+    if (!strcmp(nm, "token_run_by_hand")) return 1;
     if (!strcmp(nm, "cond_payload")) return 1;
     if (!strcmp(nm, "jump_payload")) return 1;
     if (!strcmp(nm, "exec_payload")) return 1;
@@ -401,9 +402,14 @@ static void instr_open_key(const u8 *b, u32 nlen, u32 o, u8 key_out[32]) {
     const u8 *pay = bl_payload_c(b + o);
     /* Default open target = token if 32-byte key */
     if (tlen == 32) memcpy(key_out, tok, 32);
-    /* Hash-carriers open the TARGET in payload (first 32 bytes), not the instr token */
-    if (tlen == 32 && is_hash_carrier(tok) && plen >= 32 && !zero_key(pay)) {
-        memcpy(key_out, pay, 32);
+    /* Hash-carriers open TARGET in payload */
+    if (tlen == 32 && is_hash_carrier(tok) && pay && plen >= 32) {
+        const char *nm = token_name(tok);
+        if (nm && !strcmp(nm, "token_run_by_hand") && plen >= 36) {
+            if (!zero_key(pay + 4)) memcpy(key_out, pay + 4, 32);
+        } else if (!zero_key(pay)) {
+            memcpy(key_out, pay, 32);
+        }
     }
 }
 

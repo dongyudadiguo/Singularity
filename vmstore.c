@@ -471,6 +471,42 @@ __declspec(dllexport) void cvm_edge(const H parent, const H child) {
     free(r);
 }
 
+
+/* === hand-run arm table (process-local, not persisted) === */
+#define HAND_CAP 256
+typedef struct { u32 uid; u8 armed; u8 on; } HandEnt;
+static HandEnt g_hand[HAND_CAP];
+
+static int hand_find(u32 uid, int create) {
+    int free_i = -1;
+    if (!uid) return -1;
+    for (int i = 0; i < HAND_CAP; i++) {
+        if (g_hand[i].on && g_hand[i].uid == uid) return i;
+        if (!g_hand[i].on && free_i < 0) free_i = i;
+    }
+    if (!create) return -1;
+    if (free_i < 0) free_i = 0;
+    g_hand[free_i].on = 1;
+    g_hand[free_i].uid = uid;
+    g_hand[free_i].armed = 0;
+    return free_i;
+}
+
+__declspec(dllexport) int cvm_hand_armed(u32 uid) {
+    int i = hand_find(uid, 0);
+    return (i >= 0 && g_hand[i].armed) ? 1 : 0;
+}
+
+__declspec(dllexport) void cvm_hand_toggle(u32 uid) {
+    int i = hand_find(uid, 1);
+    if (i >= 0) g_hand[i].armed ^= 1;
+}
+
+__declspec(dllexport) void cvm_hand_set(u32 uid, int armed) {
+    int i = hand_find(uid, 1);
+    if (i >= 0) g_hand[i].armed = armed ? 1 : 0;
+}
+
 /* === editor support: dirty / vote / heat / flush_key === */
 
 __declspec(dllexport) int cvm_cache_dirty(void) {
@@ -553,7 +589,7 @@ static void heat_decay_all(void) {
     {
         float k = 1.0f;
         /* approx exp(-1.5 * dt) */
-        float x = 1.5f * dt;
+        float x = 3.0f * dt; /* half fade time */
         k = 1.0f - x + 0.5f * x * x; /* cheap exp approx for small x */
         if (k < 0.05f) k = 0.05f;
         if (dt > 0.05f) {
@@ -562,7 +598,7 @@ static void heat_decay_all(void) {
             if (n < 1) n = 1;
             if (n > 30) n = 30;
             k = 1.0f;
-            for (int i = 0; i < n; i++) k *= 0.975f; /* ~1.5/s at 60fps */
+            for (int i = 0; i < n; i++) k *= 0.95f; /* ~2x faster fade */
         }
         for (int i = 0; i < HEAT_CAP; i++) {
             if (!g_heat[i].on) continue;

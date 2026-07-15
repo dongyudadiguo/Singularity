@@ -62,11 +62,12 @@ static void row_summary(const u8 *tok, u32 tlen, const u8 *payload, u32 pn,
     }
     if (pn == 0) return;
     if (nm && !strcmp(nm, "cond_token_payload") && pn >= 32) {
-        u32 uid = (pn >= 36) ? *(u32*)(payload+32) : 0;
-        u8 once = (pn >= 38) ? payload[36] : 0;
-        u8 contf = (pn >= 38) ? payload[37] : 0;
-        snprintf(sum, sumn, "-> %s #%u%s%s", token_name(payload), uid,
-                 contf ? " oo" : "", (!contf && once) ? " 1x" : "");
+        /* icon-only row: keep short target hint in sum for measure, paint may hide name */
+        snprintf(sum, sumn, "-> %s", token_name(payload));
+        return;
+    }
+    if (nm && !strcmp(nm, "token_run_by_hand") && pn >= 36) {
+        snprintf(sum, sumn, "-> %s", token_name(payload + 4));
         return;
     }
     if (nm && !strcmp(nm, "cond_payload") && pn >= 32) {
@@ -191,7 +192,10 @@ __declspec(dllexport) void run(void){
             }
 
             float icon_sz = dxgfx_icon_size(NAME_SIZE);
-            float name_w = measure_str(NAME_SIZE, nm ? nm : "?");
+            int icon_only = 0;
+            if (nm && (!strcmp(nm, "cond_token_payload") || !strcmp(nm, "cond_reexec") || !strcmp(nm, "token_run_by_hand")))
+                icon_only = 1;
+            float name_w = icon_only ? 0.0f : measure_str(NAME_SIZE, nm ? nm : "?");
             char id_text[96], extra[64], sum[100];
             int is_var = 0;
             row_summary(tok, tlen, payload, pn, sum, sizeof(sum), id_text, sizeof(id_text), extra, sizeof(extra), &is_var);
@@ -206,6 +210,7 @@ __declspec(dllexport) void run(void){
             float gap = (sum_w > 0.0f) ? NAME_GAP : 0.0f;
             float total_w;
             if (is_var) total_w = 2.0f + (has_icon ? icon_sz + ICON_GAP : 0.0f) + sum_w + PAD_X;
+            else if (icon_only) total_w = 2.0f + icon_sz + 8.0f + (sum_w > 0 ? NAME_GAP + sum_w : 0) + PAD_X;
             else total_w = 2.0f + name_w + icon_w + gap + sum_w + PAD_X;
             if (total_w < MIN_HIT_W) total_w = MIN_HIT_W;
 
@@ -228,6 +233,16 @@ __declspec(dllexport) void run(void){
                 if (has_icon) { dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, name_col, icon_name); cx += icon_sz + ICON_GAP; }
                 if (id_text[0]) { dxgfx_draw_text((int)cx, (int)ry, COL_VAR_ID, SUM_SIZE, id_text, (u32)strlen(id_text)); cx += measure_str(SUM_SIZE, id_text) + NAME_GAP; }
                 if (extra[0]) dxgfx_draw_text((int)cx, (int)ry, COL_VAR_SIZE, SUM_SIZE, extra, (u32)strlen(extra));
+            } else if (icon_only) {
+                float cx = tx;
+                const char *ic = nm;
+                if (dxgfx_has_icon(ic)) dxgfx_draw_icon(cx, ry + 1.0f, icon_sz, name_col, ic);
+                else {
+                    /* fallback glyph box */
+                    dxgfx_draw_rect(cx, ry + 2.0f, icon_sz, icon_sz, name_col, 1.0f, 0);
+                }
+                cx += icon_sz + 6.0f;
+                if (sum[0]) dxgfx_draw_text((int)cx, (int)ry, COL_SUM, SUM_SIZE, sum, (u32)strlen(sum));
             } else {
                 dxgfx_draw_text((int)tx, (int)ry, name_col, NAME_SIZE, nm ? nm : "?", (u32)strlen(nm ? nm : "?"));
                 float cx = tx + name_w;

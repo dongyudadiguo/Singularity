@@ -82,7 +82,7 @@ PART_ZOOM_Y = part_key("zoom_y")
 PART_DRAG_XY = part_key("drag_xy")
 PART_RMB_OPEN = part_key("rmb_open")
 
-ACTION_CORE = ("delete", "insert", "insert_hash", "insert_var_read", "insert_var_write", "insert_cond_token", "insert_cond_reexec", "tag_add_child", "apply_var_edit", "backspace", "clear")
+ACTION_CORE = ("delete", "insert", "insert_hash", "insert_var_read", "insert_var_write", "insert_cond_token", "insert_cond_reexec", "insert_hand", "tag_add_child", "apply_payload_edit", "tag_rename", "backspace", "clear")
 ACTION_POINTER = (
     "pan", "click", "rmb", "drag", "end_drag",
     "begin_pan", "end_pan", "begin_drag_anchor", "begin_title_drag",
@@ -284,12 +284,21 @@ def build_editor_actions(t):
         uid = random.getrandbits(32) or 1
         return u32(uid) + bytes([once & 1, continuous & 1, 0, 0])
 
+    def hand_bytes(target=None):
+        if target is None:
+            target = bytes(random.getrandbits(8) for _ in range(32))
+        uid = random.getrandbits(32) or 1
+        return u32(uid) + target
+
     return {
         "delete": make_block(sel(t) + cur(t) + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
+        # Tab: completion token
         "insert": make_block(sel(t) + cur(t) + [
             (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
             (t["block_insert_stack"], b""),
         ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        # Space: hash(input) — skip insert if empty (sha256_var still yields zeros; block_insert ignores zero)
+        # Fix: only clear when non-empty by always inserting; empty hash is zero and insert no-ops but used to jump-freeze.
         "insert_hash": make_block(sel(t) + cur(t) + [
             (t["sha256_var_payload"], INPUT_VAR),
             (t["block_insert_stack"], b""),
@@ -310,9 +319,19 @@ def build_editor_actions(t):
             (t["const_payload"], t["cond_reexec"]),
             (t["block_insert_full"], reexec_bytes()),
         ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
-        "apply_var_edit": make_block(sel(t) + cur(t) + [
-            (t["var_edit_apply"], INPUT_VAR),
+        # Ctrl+Alt: token_run_by_hand
+        "insert_hand": make_block(sel(t) + cur(t) + [
+            (t["const_payload"], t["token_run_by_hand"]),
+            (t["block_insert_full"], hand_bytes()),
         ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        # Enter: edit selected payload (var id / cond target / hand target / tag name)
+        "apply_payload_edit": make_block(sel(t) + cur(t) + [
+            (t["payload_edit_apply"], INPUT_VAR),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        "tag_rename": make_block([
+            bare(PART_ACTIVE_KEY),
+            (t["views_tag_set_name"], INPUT_VAR),
+        ] + clear_input),
         "tag_add_child": make_block([
             bare(PART_ACTIVE_KEY),
             (t["sha256_var_payload"], INPUT_VAR),
@@ -435,7 +454,7 @@ def part_rmb_open(t):
 def part_status(t):
     return [
         (t["drawtext_screen"], static_text(20, 16, 0xff9da7b3, 16.0,
-            b"modular | compose>specialized | cond opens payload | edge=down+prev")),
+            b"Enter=edit payload/target | Space=hash | Alt=var | Ctrl+Alt=hand | Ctrl=cond")),
     ]
 
 
@@ -483,25 +502,44 @@ def part_nav(t, action_keys):
 
 
 def part_editkeys(t, action_keys):
+    # VK: Space 0x20, Tab 0x09, Alt 0x12, Shift 0x10, Ctrl 0x11, Enter 0x0d
     return [
         (t["key_pressed"], u32(0x2e)), cond_action(t, action_keys["delete"]),
+        # Space: hash insert + tag child (tag_add no-ops harmlessly on non-tags if edge ok)
         (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["insert_hash"]),
         (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["tag_add_child"]),
         (t["key_pressed"], u32(0x09)), cond_action(t, action_keys["insert"]),
-        (t["key_pressed"], u32(0x0d)), cond_action(t, action_keys["apply_var_edit"]),
+        # Enter: payload edit + tag rename
+        (t["key_pressed"], u32(0x0d)), cond_action(t, action_keys["apply_payload_edit"]),
+        (t["key_pressed"], u32(0x0d)), cond_action(t, action_keys["tag_rename"]),
+        # Ctrl+Alt -> hand run
+        (t["key_down"], u32(0x11)),
+        (t["key_pressed"], u32(0x12)),
+        (t["and"], b""),
+        cond_action(t, action_keys["insert_hand"]),
+        # Shift+Ctrl -> cond_reexec
         (t["key_down"], u32(0x10)),
         (t["key_pressed"], u32(0x11)),
         (t["and"], b""),
         cond_action(t, action_keys["insert_cond_reexec"]),
+        # Ctrl alone (not shift, not alt) -> cond_token
         (t["key_pressed"], u32(0x11)),
         (t["key_down"], u32(0x10)),
         (t["not"], b""),
         (t["and"], b""),
+        (t["key_down"], u32(0x12)),
+        (t["not"], b""),
+        (t["and"], b""),
         cond_action(t, action_keys["insert_cond_token"]),
+        # Shift+Alt -> var_write
         (t["key_down"], u32(0x10)),
         (t["key_pressed"], u32(0x12)),
         (t["and"], b""),
+        (t["key_down"], u32(0x11)),
+        (t["not"], b""),
+        (t["and"], b""),
         cond_action(t, action_keys["insert_var_write"]),
+        # Alt alone (not ctrl, not shift) -> var_read
         (t["key_pressed"], u32(0x12)),
         (t["key_down"], u32(0x10)),
         (t["not"], b""),
@@ -713,7 +751,7 @@ def main():
         "key_pressed", "key_down", "cond_token_payload", "cond_payload", "name_prefix_find", "name_lookup",
         "sha256_var_payload", "mouse_f",
         "text_input", "string_append", "string_backspace",
-        "block_insert_stack", "block_insert_full", "block_delete", "views_tag_add_child", "var_edit_apply", "cond_reexec",
+        "block_insert_stack", "block_insert_full", "block_delete", "views_tag_add_child", "views_tag_set_name", "payload_edit_apply", "token_run_by_hand", "cond_reexec",
         "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down",
         "i32_to_f32", "i32_add", "i32_min", "i32_max", "eq",
         "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
