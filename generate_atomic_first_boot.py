@@ -82,7 +82,7 @@ PART_ZOOM_Y = part_key("zoom_y")
 PART_DRAG_XY = part_key("drag_xy")
 PART_RMB_OPEN = part_key("rmb_open")
 
-ACTION_CORE = ("delete", "insert", "insert_hash", "insert_var_read", "insert_var_write", "backspace", "clear")
+ACTION_CORE = ("delete", "insert", "insert_hash", "insert_var_read", "insert_var_write", "insert_cond_token", "insert_cond_reexec", "tag_add_child", "apply_var_edit", "backspace", "clear")
 ACTION_POINTER = (
     "pan", "click", "rmb", "drag", "end_drag",
     "begin_pan", "end_pan", "begin_drag_anchor", "begin_title_drag",
@@ -118,11 +118,14 @@ def write_instruction_names(result):
 
 
 def instruction(token, payload=b""):
-    return token + struct.pack("<I", len(payload)) + payload
+    """token_len[u32] + token + payload_len[u32] + payload. End of block is token_len=0."""
+    if not isinstance(token, (bytes, bytearray)):
+        raise TypeError("token must be bytes")
+    return struct.pack("<I", len(token)) + bytes(token) + struct.pack("<I", len(payload)) + payload
 
 
 def make_block(items):
-    return b"".join(instruction(*item) for item in items) + bytes(32)
+    return b"".join(instruction(*item) for item in items) + struct.pack("<I", 0)
 
 
 def u32(v):
@@ -267,34 +270,54 @@ def cur(t):
 
 
 def build_editor_actions(t):
-    # Only actions that bind payload/state — pure aliases of existing facets
-    # (cursor_add/cursor_dec) are NOT re-wrapped as actions.
-    # string edits: stack string ops + var_read/var_write (no string_*_var natives).
     clear_input = [
         (t["const_payload"], bytes(256)), (t["var_write_payload"], u32(len(INPUT_VAR)) + INPUT_VAR),
     ]
+
+    def cond_tok_bytes(target=None, once=0, continuous=1):
+        if target is None:
+            target = bytes(random.getrandbits(8) for _ in range(32))
+        uid = random.getrandbits(32) or 1
+        return target + u32(uid) + bytes([once & 1, continuous & 1, 0, 0])
+
+    def reexec_bytes(once=0, continuous=1):
+        uid = random.getrandbits(32) or 1
+        return u32(uid) + bytes([once & 1, continuous & 1, 0, 0])
+
     return {
         "delete": make_block(sel(t) + cur(t) + [(t["block_delete"], b""), (t["jump_payload"], PROGRAM_KEY)]),
-        # Tab: completion token (prefix match)
         "insert": make_block(sel(t) + cur(t) + [
             (t["var_read_payload"], INPUT_VAR), (t["name_prefix_find"], b""),
             (t["block_insert_stack"], b""),
         ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
-        # Space: hash(input) as token
         "insert_hash": make_block(sel(t) + cur(t) + [
             (t["sha256_var_payload"], INPUT_VAR),
             (t["block_insert_stack"], b""),
         ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
-        # Alt: empty var_read_payload + select that row (cursor already at insert gap)
         "insert_var_read": make_block(sel(t) + cur(t) + [
             (t["const_payload"], t["var_read_payload"]),
             (t["block_insert_stack"], b""),
         ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
-        # Shift+Alt: empty var_write_payload
         "insert_var_write": make_block(sel(t) + cur(t) + [
             (t["const_payload"], t["var_write_payload"]),
             (t["block_insert_stack"], b""),
         ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        "insert_cond_token": make_block(sel(t) + cur(t) + [
+            (t["const_payload"], t["cond_token_payload"]),
+            (t["block_insert_full"], cond_tok_bytes()),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        "insert_cond_reexec": make_block(sel(t) + cur(t) + [
+            (t["const_payload"], t["cond_reexec"]),
+            (t["block_insert_full"], reexec_bytes()),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        "apply_var_edit": make_block(sel(t) + cur(t) + [
+            (t["var_edit_apply"], INPUT_VAR),
+        ] + clear_input + [(t["jump_payload"], PROGRAM_KEY)]),
+        "tag_add_child": make_block([
+            bare(PART_ACTIVE_KEY),
+            (t["sha256_var_payload"], INPUT_VAR),
+            (t["views_tag_add_child"], views_var_payload()),
+        ] + clear_input),
         "backspace": make_block([
             (t["var_read_payload"], INPUT_VAR),
             (t["string_backspace"], u32(256)),
@@ -302,6 +325,7 @@ def build_editor_actions(t):
         ]),
         "clear": make_block(clear_input),
     }
+
 
 
 # ---------------------------------------------------------------------------
@@ -459,26 +483,37 @@ def part_nav(t, action_keys):
 
 
 def part_editkeys(t, action_keys):
-    # Space=hash token; Tab=completion; Alt=var_read; Shift+Alt=var_write
-    # Alt = VK_MENU 0x12; Shift = VK_SHIFT 0x10
     return [
         (t["key_pressed"], u32(0x2e)), cond_action(t, action_keys["delete"]),
         (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["insert_hash"]),
+        (t["key_pressed"], u32(0x20)), cond_action(t, action_keys["tag_add_child"]),
         (t["key_pressed"], u32(0x09)), cond_action(t, action_keys["insert"]),
-        # Shift+Alt (shift down && alt pressed)
+        (t["key_pressed"], u32(0x0d)), cond_action(t, action_keys["apply_var_edit"]),
+        (t["key_down"], u32(0x10)),
+        (t["key_pressed"], u32(0x11)),
+        (t["and"], b""),
+        cond_action(t, action_keys["insert_cond_reexec"]),
+        (t["key_pressed"], u32(0x11)),
+        (t["key_down"], u32(0x10)),
+        (t["not"], b""),
+        (t["and"], b""),
+        cond_action(t, action_keys["insert_cond_token"]),
         (t["key_down"], u32(0x10)),
         (t["key_pressed"], u32(0x12)),
         (t["and"], b""),
         cond_action(t, action_keys["insert_var_write"]),
-        # Alt alone (alt pressed && !shift)
         (t["key_pressed"], u32(0x12)),
         (t["key_down"], u32(0x10)),
+        (t["not"], b""),
+        (t["and"], b""),
+        (t["key_down"], u32(0x11)),
         (t["not"], b""),
         (t["and"], b""),
         cond_action(t, action_keys["insert_var_read"]),
         (t["key_pressed"], u32(0x08)), cond_action(t, action_keys["backspace"]),
         (t["key_pressed"], u32(0x1b)), cond_action(t, action_keys["clear"]),
     ]
+
 
 
 def part_click_on(t, action_keys):
@@ -678,7 +713,7 @@ def main():
         "key_pressed", "key_down", "cond_token_payload", "cond_payload", "name_prefix_find", "name_lookup",
         "sha256_var_payload", "mouse_f",
         "text_input", "string_append", "string_backspace",
-        "block_insert_stack", "block_delete",
+        "block_insert_stack", "block_insert_full", "block_delete", "views_tag_add_child", "var_edit_apply", "cond_reexec",
         "jump_payload", "mouse_f", "mouse_wheel", "mouse_button_down",
         "i32_to_f32", "i32_add", "i32_min", "i32_max", "eq",
         "f32_add", "f32_sub", "f32_mul", "f32_div", "f32_const", "f32_clamp",
@@ -816,13 +851,19 @@ def main():
 
     def collect(raw):
         off = 0
-        while off + 32 <= len(raw):
-            tok = raw[off:off + 32]
-            if tok == bytes(32):
+        while off + 4 <= len(raw):
+            tlen = struct.unpack_from("<I", raw, off)[0]
+            if tlen == 0:
                 break
-            size = struct.unpack_from("<I", raw, off + 32)[0]
-            used.add(tok)
-            off += 36 + size
+            if off + 8 + tlen > len(raw):
+                break
+            plen = struct.unpack_from("<I", raw, off + 4 + tlen)[0]
+            if off + 8 + tlen + plen > len(raw):
+                break
+            tok = raw[off + 4:off + 4 + tlen]
+            if tlen == 32:
+                used.add(bytes(tok))
+            off += 8 + tlen + plen
 
     collect(first)
     collect(program_raw)

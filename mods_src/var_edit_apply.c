@@ -1,3 +1,4 @@
+#include "block_layout.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,22 +17,6 @@ extern __declspec(dllimport) void cvm_cached_set_len(u32 n);
 
 #define MAX_BLOCK (1u << 20)
 #define MAX_ID 256
-
-/* payload: typein_var_id (any size — entire payload is id)
- * stack: u32 byte_offset of instruction in currently selected block
- *
- * If the instruction token is a var_*_payload family member, rebuild its
- * payload from the typein C-string:
- *   var_read_payload:  text -> id bytes
- *   var_write_payload: text -> id (preserve trailing data if any under new header)
- *   var_set_payload:
- *      "<id>"            -> keep size (or 0)
- *      "<id> <size>"     -> set id + size
- *      "<size>"          -> digits only: keep id, change size
- *
- * Token match is by comparing against known hashes from instruction_names if
- * present; also accepts legacy layouts.
- */
 
 typedef struct { H token; char name[96]; } Entry;
 static Entry g_ent[512];
@@ -58,39 +43,41 @@ static void load_names(void) {
 }
 
 static int same32(const u8 *a, const u8 *b) { return !memcmp(a, b, 32); }
-
 static int is_digits(const char *s) {
     if (!s || !*s) return 0;
     for (const char *p = s; *p; p++) if (*p < '0' || *p > '9') return 0;
     return 1;
 }
-
 static u32 parse_u32(const char *s) {
     u32 v = 0;
     for (const char *p = s; *p >= '0' && *p <= '9'; p++) v = v * 10u + (u32)(*p - '0');
     return v;
 }
-
-/* Replace payload at instruction offset; token unchanged. */
-static int replace_payload(u32 off, const u8 *np, u32 nn) {
-    u8 *b = cvm_cached_base();
-    u32 l = cvm_cached_len();
-    if (off + 36 > l) return 0;
-    u32 old = *(u32 *)(b + off + 32);
-    if (off + 36 + old > l) return 0;
-    if (l - old + nn > MAX_BLOCK) return 0;
-    memmove(b + off + 36 + nn, b + off + 36 + old, l - (off + 36 + old));
-    *(u32 *)(b + off + 32) = nn;
-    if (nn) memcpy(b + off + 36, np, nn);
-    cvm_cached_set_len(l - old + nn);
-    return 1;
-}
-
 static void trim(char *s) {
     u32 n = (u32)strlen(s);
     while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r' || s[n - 1] == '\n')) s[--n] = 0;
     u32 i = 0; while (s[i] == ' ' || s[i] == '\t') i++;
     if (i) memmove(s, s + i, strlen(s + i) + 1);
+}
+
+/* Replace payload at instruction offset; token unchanged. New layout. */
+static int replace_payload(u32 off, const u8 *np, u32 nn) {
+    u8 *b = cvm_cached_base();
+    u32 l = cvm_cached_len();
+    if (!bl_ok(b, l, off) || bl_is_end(b + off)) return 0;
+    u32 tlen = bl_tlen(b + off);
+    u32 old = bl_plen(b + off);
+    u32 old_sz = bl_instr_size(b + off);
+    u32 new_sz = 8 + tlen + nn;
+    if (l - old_sz + new_sz > MAX_BLOCK) return 0;
+    /* move tail */
+    memmove(b + off + new_sz, b + off + old_sz, l - (off + old_sz));
+    /* rewrite plen + payload (token stays) */
+    *(u32 *)(b + off + 4 + tlen) = nn;
+    if (nn) memcpy(b + off + 8 + tlen, np, nn);
+    cvm_cached_set_len(l - old_sz + new_sz);
+    (void)old;
+    return 1;
 }
 
 __declspec(dllexport) void run(void) {
@@ -110,122 +97,117 @@ __declspec(dllexport) void run(void) {
     trim(buf);
     if (!buf[0]) { cont(); return; }
 
+    load_names();
     u8 *b = cvm_cached_base();
     u32 l = cvm_cached_len();
-    if (off + 36 > l) { cont(); return; }
-    u8 tok[32]; memcpy(tok, b + off, 32);
-    u32 pn = *(u32 *)(b + off + 32);
-    if (off + 36 + pn > l) { cont(); return; }
-    const u8 *oldp = b + off + 36;
+    if (!bl_ok(b, l, off) || bl_is_end(b + off)) { cont(); return; }
+    u32 tlen = bl_tlen(b + off);
+    if (tlen != 32) { cont(); return; }
+    u8 tok[32]; memcpy(tok, bl_token_c(b + off), 32);
+    u32 pn = bl_plen(b + off);
+    const u8 *oldp = bl_payload_c(b + off);
 
-    load_names();
-    if (!t_ok) { cont(); return; }
+    int kind = 0; /* 1=set 2=read 3=write */
+    if ((t_ok & 1) && same32(tok, t_set)) kind = 1;
+    else if ((t_ok & 2) && same32(tok, t_read)) kind = 2;
+    else if ((t_ok & 4) && same32(tok, t_write)) kind = 3;
+    else {
+        /* fallback by name table */
+        for (u32 i = 0; i < g_n; i++) {
+            if (same32(tok, g_ent[i].token)) {
+                if (!strcmp(g_ent[i].name, "var_set_payload")) kind = 1;
+                else if (!strcmp(g_ent[i].name, "var_read_payload")) kind = 2;
+                else if (!strcmp(g_ent[i].name, "var_write_payload")) kind = 3;
+                break;
+            }
+        }
+    }
+    if (!kind) { cont(); return; }
 
-    u8 neu[4 + MAX_ID + 4 + 256];
+    u8 npay[512];
     u32 nn = 0;
 
-    if (same32(tok, t_read)) {
-        /* entire payload = id bytes from text */
-        u32 id_len = (u32)strlen(buf);
-        if (id_len > MAX_ID) id_len = MAX_ID;
-        memcpy(neu, buf, id_len);
-        nn = id_len;
-        replace_payload(off, neu, nn);
-        cont(); return;
-    }
-
-    if (same32(tok, t_write)) {
-        /* id_len + id [+ preserve old data tail if new-format] */
-        u32 id_len = (u32)strlen(buf);
-        if (id_len > MAX_ID) id_len = MAX_ID;
-        u32 old_id_len = 0, old_rest = 0;
-        const u8 *old_data = 0;
+    if (kind == 2) {
+        /* var_read_payload: entire payload is id bytes */
+        u32 idn = (u32)strlen(buf);
+        if (idn > MAX_ID) idn = MAX_ID;
+        memcpy(npay, buf, idn);
+        nn = idn;
+    } else if (kind == 3) {
+        /* var_write_payload: id_len + id [+ keep trailing data if any] */
+        u32 idn = (u32)strlen(buf);
+        if (idn > MAX_ID) idn = MAX_ID;
+        u32 rest = 0;
+        const u8 *restp = 0;
         if (pn >= 4) {
-            u32 il = *(u32 *)oldp;
-            if (il > 0 && il <= MAX_ID && pn >= 4 + il) {
-                old_id_len = il;
-                old_rest = pn - 4 - il;
-                old_data = oldp + 4 + il;
-            } else if (pn >= 32) {
-                old_rest = pn > 32 ? pn - 32 : 0;
-                old_data = oldp + 32;
+            u32 old_id_len = *(u32 *)oldp;
+            if (old_id_len > 0 && old_id_len <= 256 && pn >= 4 + old_id_len) {
+                rest = pn - 4 - old_id_len;
+                restp = oldp + 4 + old_id_len;
             }
         }
-        *(u32 *)neu = id_len;
-        memcpy(neu + 4, buf, id_len);
-        nn = 4 + id_len;
-        if (old_rest && old_data) {
-            if (nn + old_rest > sizeof(neu)) old_rest = sizeof(neu) - nn;
-            memcpy(neu + nn, old_data, old_rest);
-            nn += old_rest;
-        }
-        replace_payload(off, neu, nn);
-        cont(); return;
-    }
-
-    if (same32(tok, t_set)) {
-        /* determine current id/size from old payload */
-        u8 cur_id[MAX_ID];
-        u32 cur_id_len = 0;
-        u32 cur_size = 0;
-        int had = 0;
-        if (pn >= 4) {
-            u32 il = *(u32 *)oldp;
-            if (il > 0 && il <= MAX_ID && pn >= 4 + il) {
-                cur_id_len = il;
-                memcpy(cur_id, oldp + 4, il);
-                u32 rest = pn - 4 - il;
-                if (rest == 4) cur_size = *(u32 *)(oldp + 4 + il);
-                else cur_size = rest;
-                had = 1;
-            } else if (pn == 36) {
-                cur_id_len = 32; memcpy(cur_id, oldp, 32);
-                cur_size = *(u32 *)(oldp + 32); had = 1;
-            } else if (pn >= 32) {
-                cur_id_len = 32; memcpy(cur_id, oldp, 32);
-                cur_size = pn - 32; had = 1;
-            }
-        }
-        (void)had;
-
-        char idpart[300];
-        u32 new_size = cur_size;
-        int size_only = 0;
-
-        if (is_digits(buf)) {
-            /* digits only: change size, keep id */
-            new_size = parse_u32(buf);
-            size_only = 1;
-            if (cur_id_len) { memcpy(idpart, cur_id, cur_id_len); idpart[cur_id_len] = 0; }
-            else { idpart[0] = 0; }
+        *(u32 *)npay = idn;
+        memcpy(npay + 4, buf, idn);
+        if (rest && restp && 4 + idn + rest <= sizeof(npay)) {
+            memcpy(npay + 4 + idn, restp, rest);
+            nn = 4 + idn + rest;
         } else {
-            /* split last space-separated token if digits -> size */
-            char *sp = strrchr(buf, ' ');
-            if (sp && sp > buf && is_digits(sp + 1)) {
-                *sp = 0;
-                trim(buf);
-                new_size = parse_u32(sp + 1);
+            nn = 4 + idn;
+        }
+    } else {
+        /* var_set_payload */
+        char idbuf[256]; u32 size_val = 0; int has_size = 0;
+        if (is_digits(buf)) {
+            /* digits only: keep old id, change size */
+            has_size = 1;
+            size_val = parse_u32(buf);
+            idbuf[0] = 0;
+            if (pn >= 4) {
+                u32 old_id_len = *(u32 *)oldp;
+                if (old_id_len > 0 && old_id_len <= 256 && pn >= 4 + old_id_len) {
+                    u32 z2 = old_id_len < 255 ? old_id_len : 255;
+                    memcpy(idbuf, oldp + 4, z2); idbuf[z2] = 0;
+                }
             }
-            strncpy(idpart, buf, sizeof(idpart) - 1);
-            idpart[sizeof(idpart) - 1] = 0;
+            if (!idbuf[0]) { cont(); return; }
+        } else {
+            /* "id" or "id size" */
+            char *sp = strchr(buf, ' ');
+            if (sp) {
+                *sp = 0;
+                char *rest = sp + 1;
+                while (*rest == ' ') rest++;
+                if (is_digits(rest)) { has_size = 1; size_val = parse_u32(rest); }
+            }
+            strncpy(idbuf, buf, 255); idbuf[255] = 0;
         }
-
-        u32 id_len = (u32)strlen(idpart);
-        if (!id_len && cur_id_len) {
-            memcpy(idpart, cur_id, cur_id_len);
-            idpart[cur_id_len] = 0;
-            id_len = cur_id_len;
+        u32 idn = (u32)strlen(idbuf);
+        if (!idn) { cont(); return; }
+        *(u32 *)npay = idn;
+        memcpy(npay + 4, idbuf, idn);
+        if (has_size) {
+            *(u32 *)(npay + 4 + idn) = size_val;
+            nn = 4 + idn + 4;
+        } else if (pn >= 4) {
+            u32 old_id_len = *(u32 *)oldp;
+            u32 rest = 0;
+            if (old_id_len > 0 && old_id_len <= 256 && pn >= 4 + old_id_len)
+                rest = pn - 4 - old_id_len;
+            if (rest == 4) {
+                memcpy(npay + 4 + idn, oldp + 4 + old_id_len, 4);
+                nn = 4 + idn + 4;
+            } else if (rest) {
+                if (4 + idn + rest > sizeof(npay)) rest = sizeof(npay) - 4 - idn;
+                memcpy(npay + 4 + idn, oldp + 4 + old_id_len, rest);
+                nn = 4 + idn + rest;
+            } else {
+                nn = 4 + idn;
+            }
+        } else {
+            nn = 4 + idn;
         }
-        if (id_len > MAX_ID) id_len = MAX_ID;
-        if (!id_len) { cont(); return; }
-
-        *(u32 *)neu = id_len;
-        memcpy(neu + 4, idpart, id_len);
-        *(u32 *)(neu + 4 + id_len) = new_size;
-        nn = 4 + id_len + 4;
-        replace_payload(off, neu, nn);
-        cont(); return;
     }
 
+    replace_payload(off, npay, nn);
     cont();
 }

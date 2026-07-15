@@ -1,3 +1,4 @@
+#include "block_layout.h"
 #include <stdio.h>
 #include <string.h>
 typedef unsigned char u8; typedef unsigned u32; typedef u8 H[32];
@@ -22,11 +23,9 @@ static void load_index(void){
         fclose(f); return;
     }
 }
-static int zero32(const u8 *p){ for(int i=0;i<32;i++) if(p[i]) return 0; return 1; }
 static int same32(const u8 *a,const u8 *b){ return !memcmp(a,b,32); }
 static const char *token_name(const u8 *tok){
     static char hex[12];
-    if (zero32(tok)) return "<end>";
     load_index();
     for (u32 i=0;i<g_entry_count;i++) if (same32(g_entries[i].token,tok)) return g_entries[i].name;
     snprintf(hex,sizeof(hex),"%02x%02x%02x%02x",tok[0],tok[1],tok[2],tok[3]);
@@ -34,32 +33,26 @@ static const char *token_name(const u8 *tok){
 }
 static int is_hash_carrier(const u8 *tok){
     const char *nm = token_name(tok);
-    if (!nm || !nm[0] || nm[0]=='<') return 0;
-    return !strcmp(nm,"cond_payload") || !strcmp(nm,"jump_payload")
-        || !strcmp(nm,"exec_payload") || !strcmp(nm,"cond_reexec")
-        || !strcmp(nm,"cond") || !strcmp(nm,"exec") || !strcmp(nm,"jump_payload");
+    if (!nm || !nm[0]) return 0;
+    return !strcmp(nm,"cond_token_payload") || !strcmp(nm,"cond_payload")
+        || !strcmp(nm,"jump_payload") || !strcmp(nm,"exec_payload");
 }
 /* stack: u32 row -> key[32] open target from CURRENT cached block */
 __declspec(dllexport) void run(void){
     u32 row = *(u32*)pop(4);
     u8 *b = cvm_cached_base(); u32 nlen = cvm_cached_len();
     u32 o = 0;
-    for (u32 r = 0; r < row && o + 36 <= nlen; r++) {
-        if (zero32(b+o)) { o = nlen; break; }
-        u32 pn = *(u32*)(b+o+32);
-        if (o+36+pn > nlen) { o = nlen; break; }
-        o += 36 + pn;
-    }
-    u8 key[32]; memset(key,0,32);
-    if (o+32 <= nlen && !zero32(b+o)) {
-        memcpy(key, b+o, 32);
-        if (o+36 <= nlen) {
-            u32 pn = *(u32*)(b+o+32);
-            if (pn==32 && o+68<=nlen && is_hash_carrier(key)) {
-                u8 ph[32]; memcpy(ph,b+o+36,32);
-                if (!zero32(ph)) memcpy(key,ph,32);
-            }
-        }
+    u8 key[32]; memset(key, 0, 32);
+    for (u32 r = 0; r < row && bl_ok(b, nlen, o) && !bl_is_end(b + o); r++)
+        o += bl_instr_size(b + o);
+    if (bl_ok(b, nlen, o) && !bl_is_end(b + o)) {
+        u32 tlen = bl_tlen(b + o);
+        const u8 *tok = bl_token_c(b + o);
+        u32 pn = bl_plen(b + o);
+        const u8 *pay = bl_payload_c(b + o);
+        if (tlen == 32) memcpy(key, tok, 32);
+        if (tlen == 32 && is_hash_carrier(tok) && pn >= 32 && !bl_zero32(pay))
+            memcpy(key, pay, 32);
     }
     push(key, 32);
     cont();

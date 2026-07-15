@@ -1,6 +1,4 @@
-#include <string.h>
-typedef unsigned char u8;
-typedef unsigned u32;
+#include "block_layout.h"
 extern __declspec(dllimport) void cont(void);
 extern __declspec(dllimport) void *pop(u32 size);
 extern __declspec(dllimport) u8 *cvm_payload(void);
@@ -14,10 +12,9 @@ __declspec(dllexport) void run(void) {
     else off = *(u32*)pop(4);
     u8 *base = cvm_cached_base();
     u32 len = cvm_cached_len();
-    if (len < 32 || off > len - 32) { cont(); return; }
-    u32 n = *(u32*)(base + off + 32);
-    u32 del = 36 + n;
-    if (off + del > len - 32) { cont(); return; }
+    if (!bl_ok(base, len, off) || bl_is_end(base + off)) { cont(); return; }
+    u32 del = bl_instr_size(base + off);
+    if (off + del > len) { cont(); return; }
     memmove(base + off, base + off + del, len - off - del);
     cvm_cached_set_len(len - del);
     cont();

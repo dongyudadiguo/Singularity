@@ -11,47 +11,56 @@ static int row_from_link_y(float link_y, float row_h) {
 }
 
 static void vote_node_tokens(const View *v) {
+    if (key_is_tag(v->key)) {
+        /* Tag explorer: vote node -> each child */
+        H kids[256]; H p; memcpy(p, v->key, 32);
+        u32 kc = cvm_children(p, kids, 256);
+        if (kc > 256) kc = 256;
+        H parent; memcpy(parent, v->key, 32);
+        for (u32 i = 0; i < kc; i++) {
+            if (zero_key(kids[i]) || same_key(kids[i], parent)) continue;
+            cvm_vote(parent, kids[i]);
+        }
+        return;
+    }
     H h; cvm_resolve_payload_hash(v->key, h);
     u8 *b = cvm_cached_base();
     u32 n = cvm_cached_len();
     u32 o = 0;
     H parent; memcpy(parent, v->key, 32);
-    while (o + 36 <= n && !zero_key(b + o)) {
-        u32 pn = *(u32*)(b + o + 32);
-        if (o + 36 + pn > n) break;
-        H child; memcpy(child, b + o, 32);
-        cvm_vote(parent, child);
-        o += 36 + pn;
+    while (bl_ok(b, n, o) && !bl_is_end(b + o)) {
+        u32 tlen = bl_tlen(b + o);
+        const u8 *tok = bl_token_c(b + o);
+        if (tlen == 32) {
+            H child; memcpy(child, tok, 32);
+            cvm_vote(parent, child);
+        }
+        o += bl_instr_size(b + o);
     }
 }
 
-/* Toggle once/continuous on cond_token_payload at parent row. */
 static int toggle_cond_flag(View *parent, u32 row, int which) {
     if (key_is_tag(parent->key)) return 0;
     H h; cvm_resolve_payload_hash(parent->key, h);
     u8 *b = cvm_cached_base();
     u32 n = cvm_cached_len();
     u32 o = block_row_offset(parent, row);
-    if (o + 36 > n) return 0;
-    const char *nm = token_name(b + o);
-    u32 pn = *(u32*)(b + o + 32);
+    if (!bl_ok(b, n, o) || bl_is_end(b + o)) return 0;
+    u32 tlen = bl_tlen(b + o);
+    if (tlen != 32) return 0;
+    const char *nm = token_name(bl_token_c(b + o));
+    u32 pn = bl_plen(b + o);
     if (!nm || strcmp(nm, "cond_token_payload") || pn < 38) return 0;
-    u8 *pay = b + o + 36;
+    u8 *pay = bl_payload(b + o);
     if (which == 1) {
-        pay[36] = pay[36] ? 0 : 1; /* once toggle */
+        pay[36] = pay[36] ? 0 : 1;
     } else if (which == 2) {
-        pay[37] = pay[37] ? 0 : 1; /* continuous toggle */
-        if (pay[37]) pay[36] = 0; /* continuous hides/clears once */
+        pay[37] = pay[37] ? 0 : 1;
+        if (pay[37]) pay[36] = 0;
     }
     return 1;
 }
 
-/* stack: mx,my; payload: id + title_h,row_h,row_count
- * title buttons: commit / latch / vote (before title-drag)
- * mid-link cond buttons
- * title -> set active + dragging
- * row   -> select_row
- */
 __declspec(dllexport) void run(void){
     const u8 *id; u32 id_len; const u8 *args; u32 an;
     if (!payload_id(&id, &id_len, &args, &an)) { cont(); return; }
@@ -64,7 +73,7 @@ __declspec(dllexport) void run(void){
     Table *tp=load_table(id, id_len); if(!tp){ push(&handled,4); cont(); return; }
     Table t=*tp;
 
-    /* 1) Mid-link cond buttons (once / continuous) */
+    /* Mid-link cond buttons */
     for (u32 vi = 0; vi < t.count; vi++) {
         View *v = &t.views[vi];
         if (!v->used || !v->linked || v->parent < 0) continue;
@@ -77,42 +86,43 @@ __declspec(dllexport) void run(void){
         if (key_is_tag(p->key)) continue;
         const u8 *instr = row_instr(p, prow, 0);
         if (!instr) continue;
-        const char *nm = token_name(instr);
-        u32 pn = *(u32*)(instr + 32);
+        u32 tlen = bl_tlen(instr);
+        if (tlen != 32) continue;
+        const char *nm = token_name(bl_token_c(instr));
+        u32 pn = bl_plen(instr);
         if (!nm || strcmp(nm, "cond_token_payload") || pn < 38) continue;
         u8 once = 0, contf = 0;
-        cond_token_parse(instr + 36, pn, 0, 0, &once, &contf);
+        cond_token_parse(bl_payload_c(instr), pn, 0, 0, &once, &contf);
         float bx = midx - 28.0f, by = midy - 9.0f;
         if (!contf) {
             if (mx >= bx && mx < bx + 28.0f && my >= by && my < by + 18.0f) {
                 toggle_cond_flag(p, prow, 1);
-                handled = 1;
-                store_table(id, id_len, &t);
+                handled = 1; store_table(id, id_len, &t);
                 push(&handled,4); cont(); return;
             }
             bx += 32.0f;
         }
         if (mx >= bx && mx < bx + 28.0f && my >= by && my < by + 18.0f) {
             toggle_cond_flag(p, prow, 2);
-            handled = 1;
-            store_table(id, id_len, &t);
+            handled = 1; store_table(id, id_len, &t);
             push(&handled,4); cont(); return;
         }
     }
 
-    /* 2) Header buttons (commit / latch / vote) — no drag */
+    /* Header buttons */
     for (int i=(int)t.count-1;i>=0;i--) {
         View *v=&t.views[i]; if(!v->used) continue;
-        int dirty = (!key_is_tag(v->key)) ? cvm_key_dirty(v->key) : 0;
-        int show_rec = !dirty && !key_is_tag(v->key);
-        int btn = header_btn_hit((u32)i, v, mx, my, title_h, dirty, show_rec);
+        int is_tag = key_is_tag(v->key);
+        int dirty = (!is_tag) ? cvm_key_dirty(v->key) : 0;
+        int show_rec = is_tag || !dirty;
+        int show_latch = !is_tag;
+        int btn = header_btn_hit((u32)i, v, mx, my, title_h, dirty, show_rec, show_latch);
         if (!btn) continue;
         t.active = (u32)i;
         t.dragging = -1;
         if (btn == 1) {
-            /* commit once */
             cvm_flush_key(v->key);
-        } else if (btn == 2) {
+        } else if (btn == 2 && show_latch) {
             t.views[i].pad0 ^= 1u;
         } else if (btn == 3) {
             vote_node_tokens(v);
@@ -122,16 +132,15 @@ __declspec(dllexport) void run(void){
         push(&handled,4); cont(); return;
     }
 
-    /* 3) Title drag */
+    /* Title drag */
     for (int i=(int)t.count-1;i>=0;i--) {
         View *v=&t.views[i]; if(!v->used) continue;
         float width=title_text_width((u32)i,v);
-        /* extend hit to include buttons so empty title area still works */
-        int dirty = (!key_is_tag(v->key)) ? cvm_key_dirty(v->key) : 0;
-        int show_rec = !dirty && !key_is_tag(v->key);
-        float hw = header_total_width((u32)i, v, dirty, show_rec);
-        if (hw > width) width = hw;
-        if (mx>=v->x && mx<v->x+width && my>=v->y-title_h && my<v->y) {
+        int is_tag = key_is_tag(v->key);
+        int dirty = (!is_tag) ? cvm_key_dirty(v->key) : 0;
+        int show_rec = is_tag || !dirty;
+        float hw = width + 120.0f;
+        if (mx>=v->x && mx<v->x+hw && my>=v->y-title_h && my<v->y) {
             t.active=(u32)i;
             t.dragging=i;
             handled=1;
@@ -140,7 +149,7 @@ __declspec(dllexport) void run(void){
         }
     }
 
-    /* 4) Row select */
+    /* Row select — always allow click-select */
     for (int i=(int)t.count-1;i>=0;i--) {
         View *v=&t.views[i]; if(!v->used) continue;
         float rel=my-v->y; if(rel<0) continue;

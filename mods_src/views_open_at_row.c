@@ -1,3 +1,4 @@
+#include "block_layout.h"
 #include <stdio.h>
 #include <string.h>
 typedef unsigned char u8;
@@ -100,10 +101,8 @@ __declspec(dllexport) void run(void) {
     u8 *b = cvm_cached_base();
     u32 n = cvm_cached_len();
     u32 o=0;
-    for (u32 i=0; i<row && o+36<=n && !zero32(b+o); i++) {
-        u32 pn=*(u32*)(b+o+32);
-        if (o+36+pn>n) { o=n; break; }
-        o += 36+pn;
+    for (u32 i=0; i<row && bl_ok(b,n,o) && !bl_is_end(b+o); i++) {
+        o += bl_instr_size(b+o);
     }
     u8 key[32]; memset(key,0,32);
     if (o+32<=n && !zero32(b+o)) memcpy(key,b+o,32);

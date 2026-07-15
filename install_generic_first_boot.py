@@ -94,21 +94,22 @@ def load_verified_identity():
 
 
 def instructions(raw):
+    """New layout: token_len[u32]+token+payload_len[u32]+payload; end token_len==0."""
     off = 0
     result = []
-    while off + 32 <= len(raw):
-        token = raw[off:off + 32]
-        if token == bytes(32):
-            if off + 32 != len(raw):
-                raise ValueError("data follows the zero-token terminator")
+    while off + 4 <= len(raw):
+        tlen = struct.unpack_from("<I", raw, off)[0]
+        if tlen == 0:
             return result
-        if off + 36 > len(raw):
+        if off + 8 + tlen > len(raw):
             raise ValueError("truncated instruction header")
-        payload_size = struct.unpack_from("<I", raw, off + 32)[0]
-        end = off + 36 + payload_size
+        plen = struct.unpack_from("<I", raw, off + 4 + tlen)[0]
+        end = off + 8 + tlen + plen
         if end > len(raw):
             raise ValueError("truncated instruction payload")
-        result.append((token, raw[off + 36:end]))
+        token = raw[off + 4:off + 4 + tlen]
+        payload = raw[off + 8 + tlen:end]
+        result.append((token, payload))
         off = end
     raise ValueError("block has no zero-token terminator")
 
@@ -136,6 +137,8 @@ def require_atomic_mods(manifest, blocks):
     bootstrap_tokens = {token for token, _ in instructions(blocks["first_bootstrap_block.bin"])}
     for block_name, raw in blocks.items():
         for token, _ in instructions(raw):
+            if len(token) != 32:
+                continue  # non-hash data tokens are content, not native mods
             if token in logical:
                 continue
             name = allowed.get(token)

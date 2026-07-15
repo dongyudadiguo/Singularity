@@ -20,6 +20,7 @@ extern __declspec(dllimport) u32 cvm_cached_len(void);
 extern __declspec(dllimport) u32 cvm_children(const H parent, H *out, u32 cap);
 extern __declspec(dllimport) u32 cvm_file_read(const H h, u8 *out, u32 cap);
 #include "../dxgfx.h"
+#include "block_layout.h"
 
 #define VIEW_MAX 32
 #define NAME_SIZE 17.0f
@@ -135,9 +136,31 @@ static int is_hash_carrier(const u8 *tok) {
     if (!strcmp(nm, "cond_payload")) return 1;
     if (!strcmp(nm, "jump_payload")) return 1;
     if (!strcmp(nm, "exec_payload")) return 1;
-    if (!strcmp(nm, "cond_reexec")) return 1;
+    /* cond_reexec has no target key in payload — opens self / not carrier */
     return 0;
 }
+/* token display name from instruction pointer (new layout) */
+static const char *instr_token_name(const u8 *instr) {
+    static char hex[16];
+    if (!instr || bl_is_end(instr)) return "<end>";
+    u32 tlen = bl_tlen(instr);
+    const u8 *tok = bl_token_c(instr);
+    if (tlen == 32) return token_name(tok);
+    /* non-32: show short hex of first bytes */
+    snprintf(hex, sizeof(hex), "d:%u", tlen);
+    return hex;
+}
+static const u8 *instr_token_ptr(const u8 *instr, u32 *tlen_out) {
+    if (!instr || bl_is_end(instr)) { if (tlen_out) *tlen_out = 0; return 0; }
+    if (tlen_out) *tlen_out = bl_tlen(instr);
+    return bl_token_c(instr);
+}
+static const u8 *instr_payload_ptr(const u8 *instr, u32 *plen_out) {
+    if (!instr || bl_is_end(instr)) { if (plen_out) *plen_out = 0; return 0; }
+    if (plen_out) *plen_out = bl_plen(instr);
+    return bl_payload_c(instr);
+}
+
 
 /* Header chrome buttons to the right of title text.
  * layout: [title]  [提交] [合闸] / [推荐]
@@ -161,25 +184,27 @@ static float header_total_width(u32 vi, const View *v, int dirty, int show_rec) 
     if (show_rec && !dirty) x += btn_w("vote") + BTN_GAP;
     return x;
 }
-/* Which header button under (mx,my)? 0=none 1=commit 2=latch 3=vote */
+/* Which header button under (mx,my)? 0=none 1=commit 2=latch 3=vote
+ * show_latch=0 for tag explorer nodes.
+ */
 static int header_btn_hit(u32 vi, const View *v, float mx, float my, float title_h,
-                          int dirty, int show_rec) {
+                          int dirty, int show_rec, int show_latch) {
     if (my < v->y - title_h || my >= v->y) return 0;
     float tw = title_text_width(vi, v);
     float x = v->x + tw + 10.0f;
     float by = v->y - title_h + 4.0f;
     int latch = (v->pad0 & 1u) != 0;
-    if (dirty && !latch) {
+    if (show_latch && dirty && !latch) {
         float w = btn_w("commit");
         if (mx >= x && mx < x + w && my >= by && my < by + BTN_H) return 1;
         x += w + BTN_GAP;
     }
-    {
+    if (show_latch) {
         float w = btn_w(latch ? "latch*" : "latch");
         if (mx >= x && mx < x + w && my >= by && my < by + BTN_H) return 2;
         x += w + BTN_GAP;
     }
-    if (show_rec && !dirty) {
+    if (show_rec) {
         float w = btn_w("vote");
         if (mx >= x && mx < x + w && my >= by && my < by + BTN_H) return 3;
     }
@@ -197,9 +222,9 @@ static int cond_token_parse(const u8 *payload, u32 pn, u8 tok_out[32], u32 *uid,
 }
 
 static void payload_summary(const u8 *instr, char *out, u32 outn) {
-    u32 pn = *(u32 *)(instr + 32);
-    if (!pn) { out[0] = 0; return; }
-    const u8 *p = instr + 36;
+    u32 pn = 0;
+    const u8 *p = instr_payload_ptr(instr, &pn);
+    if (!pn || !p) { out[0] = 0; return; }
     u32 z = pn < 42 ? pn : 42;
     int printable = 1;
     for (u32 j = 0; j < z; j++) if (p[j] < 32 || p[j] > 126) { printable = 0; break; }
@@ -207,7 +232,7 @@ static void payload_summary(const u8 *instr, char *out, u32 outn) {
     else snprintf(out, outn, "[%u bytes]", pn);
 }
 static float row_text_width(const u8 *instr) {
-    const char *nm = token_name(instr);
+    const char *nm = instr_token_name(instr);
     float icon = NAME_SIZE;
     float w = 2.0f; /* no left swatch */
     int is_var = 0;
@@ -248,14 +273,12 @@ static const u8 *row_instr(const View *v, u32 row, u32 *out_count) {
     u8 *b = cvm_cached_base();
     u32 nlen = cvm_cached_len();
     u32 o = 0, r = 0;
-    while (o + 36 <= nlen && !zero_key(b + o)) {
-        u32 pn = *(u32 *)(b + o + 32);
-        if (o + 36 + pn > nlen) break;
+    while (bl_ok(b, nlen, o) && !bl_is_end(b + o)) {
         if (r == row) {
             if (out_count) *out_count = r + 1;
             return b + o;
         }
-        o += 36 + pn;
+        o += bl_instr_size(b + o);
         r++;
         if (r > 256) break;
     }
@@ -268,10 +291,8 @@ static u32 block_row_count(const View *v) {
     u8 *b = cvm_cached_base();
     u32 nlen = cvm_cached_len();
     u32 o = 0, r = 0;
-    while (o + 36 <= nlen && !zero_key(b + o)) {
-        u32 pn = *(u32 *)(b + o + 32);
-        if (o + 36 + pn > nlen) break;
-        o += 36 + pn;
+    while (bl_ok(b, nlen, o) && !bl_is_end(b + o)) {
+        o += bl_instr_size(b + o);
         r++;
         if (r > 256) break;
     }
@@ -351,14 +372,16 @@ static Table *load_or_empty(const u8 *id, u32 id_len, int create) {
  * If token is hash-carrier and payload is 32-byte non-zero, use payload. */
 static void instr_open_key(const u8 *b, u32 nlen, u32 o, u8 key_out[32]) {
     memset(key_out, 0, 32);
-    if (o + 32 > nlen || zero_key(b + o)) return;
-    memcpy(key_out, b + o, 32);
-    if (o + 36 > nlen) return;
-    u32 pn = *(u32 *)(b + o + 32);
-    if (pn == 32 && o + 68 <= nlen && is_hash_carrier(key_out)) {
-        u8 ph[32];
-        memcpy(ph, b + o + 36, 32);
-        if (!zero_key(ph)) memcpy(key_out, ph, 32);
+    if (!bl_ok(b, nlen, o) || bl_is_end(b + o)) return;
+    u32 tlen = bl_tlen(b + o);
+    const u8 *tok = bl_token_c(b + o);
+    u32 plen = bl_plen(b + o);
+    const u8 *pay = bl_payload_c(b + o);
+    /* Default open target = token if 32-byte key */
+    if (tlen == 32) memcpy(key_out, tok, 32);
+    /* Hash-carriers open the TARGET in payload (first 32 bytes), not the instr token */
+    if (tlen == 32 && is_hash_carrier(tok) && plen >= 32 && !zero_key(pay)) {
+        memcpy(key_out, pay, 32);
     }
 }
 
@@ -369,11 +392,8 @@ static u32 block_row_offset(const View *v, u32 row) {
     u8 *b = cvm_cached_base();
     u32 nlen = cvm_cached_len();
     u32 o = 0;
-    for (u32 r = 0; r < row && o + 36 <= nlen; r++) {
-        if (zero_key(b + o)) return nlen;
-        u32 pn = *(u32 *)(b + o + 32);
-        if (o + 36 + pn > nlen) return nlen;
-        o += 36 + pn;
+    for (u32 r = 0; r < row && bl_ok(b, nlen, o) && !bl_is_end(b + o); r++) {
+        o += bl_instr_size(b + o);
     }
     return o;
 }

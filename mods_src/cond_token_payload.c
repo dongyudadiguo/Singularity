@@ -9,35 +9,18 @@ extern __declspec(dllimport) u32 cvm_payload_size(void);
 extern __declspec(dllimport) void cvm_exec(const H h);
 extern __declspec(dllimport) void cvm_heat_pulse(u32 uid, const H node_key);
 
-/*
- * payload:
- *   token[32] + uid[u32] + once[u8] + continuous[u8] + pad[2]
- *   total 40 bytes (pad may be absent if size==38)
- *
- * stack: bool (u32)
- *
- * Semantics:
- *   continuous != 0 : exec every frame while true
- *   once != 0       : rising-edge only (per uid)
- *   both 0          : treat as continuous (legacy-friendly)
- *
- * Heat: pulse uid on each actual exec. node_key unknown here (0).
- * Editor paints heat by uid on the cond row; node heat uses separate
- * pulse sites when available.
- */
 static int mod_bool(const void *p) {
     const u8 *b = (const u8*)p;
     for (u32 i = 0; i < 4; i++) if (b[i]) return 1;
     return 0;
 }
 
-/* Rising-edge memory for once mode. */
 #define ONCE_CAP 256
 static struct { u32 uid; u8 prev; u8 on; } g_once[ONCE_CAP];
 
 static int once_should_fire(u32 uid, int cur) {
     int free_i = -1;
-    if (!uid) return cur; /* no uid: fire whenever true */
+    if (!uid) return cur;
     for (int i = 0; i < ONCE_CAP; i++) {
         if (g_once[i].on && g_once[i].uid == uid) {
             int edge = cur && !g_once[i].prev;
@@ -51,10 +34,14 @@ static int once_should_fire(u32 uid, int cur) {
         g_once[i].on = 1;
         g_once[i].uid = uid;
         g_once[i].prev = (u8)(cur ? 1 : 0);
-        return cur; /* first sighting while true counts as edge */
+        return cur;
     }
 }
 
+/*
+ * payload: token[32] + uid[u32] + once[u8] + continuous[u8] + pad[2]
+ * Heat: pulse TARGET token as node_key so the opened/target node lights up.
+ */
 __declspec(dllexport) void run(void) {
     H h;
     int ok = mod_bool(pop(4));
@@ -67,14 +54,11 @@ __declspec(dllexport) void run(void) {
     if (n < 32) { cont(); return; }
     for (u32 i = 0; i < 32; i++) h[i] = p[i];
     if (n >= 36) uid = *(u32*)(p + 32);
-    if (n >= 38) {
-        once = p[36];
-        continuous = p[37];
-    }
+    if (n >= 38) { once = p[36]; continuous = p[37]; }
     if (!once && !continuous) continuous = 1;
 
     if (!ok) {
-        if (once) once_should_fire(uid, 0); /* update prev */
+        if (once) once_should_fire(uid, 0);
         cont();
         return;
     }
@@ -84,7 +68,8 @@ __declspec(dllexport) void run(void) {
     else fire = 1;
 
     if (fire) {
-        if (uid) cvm_heat_pulse(uid, 0);
+        /* target node heat */
+        cvm_heat_pulse(uid ? uid : 1, h);
         cvm_exec(h);
     } else cont();
 }
